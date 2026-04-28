@@ -230,8 +230,78 @@ If `iam:SimulatePrincipalPolicy` is not allowed on your principal, the script au
 ### Red Hat Pull Secret
 
 1. Go to https://console.redhat.com/openshift/install/pull-secret
-2. Download or copy your pull secret
-3. Paste it into `terraform.tfvars` as the `pull_secret` value
+2. Log in with your Red Hat account
+3. Click **Copy pull secret**
+4. Paste it into `terraform.tfvars` as the `pull_secret` value:
+   ```
+   pull_secret = "{\"auths\":{...}}"
+   ```
+
+> A Red Hat account is free. If you don't have one, register at https://www.redhat.com/wapps/ugc/register.html
+
+---
+
+### SSH Key Pair
+
+OpenShift nodes are provisioned with your SSH public key so you can log in directly for troubleshooting. You need to provide the **public key** (the `.pub` file) — the private key never leaves your machine.
+
+#### Check for an existing key
+
+```bash
+ls ~/.ssh/*.pub
+```
+
+If you see a file (e.g. `~/.ssh/id_ed25519.pub` or `~/.ssh/id_rsa.pub`), you already have a key pair and can skip straight to the **Add to terraform.tfvars** step below.
+
+#### Generate a new key pair (if you don't have one)
+
+**ed25519 — recommended (modern, shorter key, faster)**
+```bash
+ssh-keygen -t ed25519 -C "ocp-installer"
+# Accept the default path (~/.ssh/id_ed25519) or specify your own
+# Set a passphrase when prompted (strongly recommended)
+```
+
+**RSA — use this if your environment requires RSA**
+```bash
+ssh-keygen -t rsa -b 4096 -C "ocp-installer"
+# Accept the default path (~/.ssh/id_rsa) or specify your own
+```
+
+This creates two files:
+| File | What it is |
+|------|-----------|
+| `~/.ssh/id_ed25519` | Private key — keep this secret, never share it |
+| `~/.ssh/id_ed25519.pub` | Public key — this is what goes into `terraform.tfvars` |
+
+#### Add to terraform.tfvars
+
+Copy the public key content:
+```bash
+cat ~/.ssh/id_ed25519.pub
+# or for RSA:
+cat ~/.ssh/id_rsa.pub
+```
+
+Paste the entire output as the `ssh_public_key` value:
+```hcl
+ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA... ocp-installer"
+```
+
+> The key must start with `ssh-ed25519`, `ssh-rsa`, or `ecdsa-sha2-*`. Paste the full single line — do not split it across multiple lines.
+
+#### Connect to a node (after cluster is up)
+
+The SSH key is placed on all nodes by the installer. To connect directly to a node:
+```bash
+# List nodes and their IP addresses
+oc get nodes -o wide
+
+# SSH to a node (core is the default user on RHCOS nodes)
+ssh -i ~/.ssh/id_ed25519 core@<node-ip>
+```
+
+> Direct SSH is typically only needed for deep troubleshooting. Most operational tasks are done via `oc` or the OpenShift console.
 
 ### Validating terraform.tfvars
 
