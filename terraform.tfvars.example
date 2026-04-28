@@ -1,0 +1,51 @@
+# ─── Copy this file to terraform.tfvars and fill in your values ──────────────
+# terraform.tfvars is listed in .gitignore — never commit it.
+
+# ─── Required ─────────────────────────────────────────────────────────────────
+
+cluster_name = "my-ocp-cluster"       # e.g. dev-cluster, prod-ocp, acme-ocp
+
+base_domain = "example.com"           # Route53 public hosted zone must exist
+
+pull_secret = ""                      # Paste from https://console.redhat.com/openshift/install/pull-secret
+
+ssh_public_key = ""                   # Contents of ~/.ssh/id_rsa.pub
+
+# ─── Control Plane ────────────────────────────────────────────────────────────
+
+master_count = 3                      # 1 (dev/test) or 3 (production HA)
+
+master_instance_type = "m5.xlarge"   # Minimum for production: m5.2xlarge
+                                      # Options: m5.xlarge | m5.2xlarge | m5.4xlarge
+                                      #          m6i.xlarge | m6i.2xlarge | m6i.4xlarge
+
+# ─── Compute Nodes ────────────────────────────────────────────────────────────
+
+worker_count = 3                      # Minimum 2, recommend 3+ for production
+
+worker_instance_type = "m5.large"    # Choose based on workload:
+                                      # General:  m5.large | m5.xlarge | m6i.large
+                                      # Compute:  c5.xlarge | c5.2xlarge
+                                      # Memory:   r5.xlarge | r5.2xlarge
+                                      # GPU:      g4dn.xlarge
+
+# ─── AWS ──────────────────────────────────────────────────────────────────────
+
+aws_region = "us-east-1"
+
+availability_zones = []               # Leave empty for auto-selection, or specify:
+                                      # ["us-east-1a", "us-east-1b", "us-east-1c"]
+
+# ─── Optional ─────────────────────────────────────────────────────────────────
+
+ocp_version = "4.16.3"
+
+publish = "External"                  # External (internet-facing) or Internal (VPC only)
+
+network_type = "OVNKubernetes"        # OVNKubernetes (default) or OpenShiftSDN
+
+master_root_volume_size = 120         # GB
+worker_root_volume_size = 120         # GB
+root_volume_type        = "gp3"       # gp2 | gp3 | io1 | io2
+
+fips_enabled = false                  # true for US government / compliance requirements
