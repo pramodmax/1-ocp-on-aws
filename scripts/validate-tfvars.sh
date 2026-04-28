@@ -51,13 +51,15 @@ echo ""
 # ─── Parser ───────────────────────────────────────────────────────────────────
 
 # Extracts a single-line HCL string value: var_name = "value"
-# Captures only the content between the first pair of double-quotes so that
-# inline comments (# ...) after the closing quote are never included.
+# Uses ^[^=]*= (not .*=) to strip only the first = on the line so that
+# = signs inside base64-encoded values (e.g. SSH keys, pull secrets) are
+# never consumed. Captures only the content between the first pair of
+# double-quotes so inline comments after the closing quote are ignored.
 get_var() {
   local key="$1"
   grep -E "^[[:space:]]*${key}[[:space:]]*=" "$TFVARS_FILE" 2>/dev/null \
     | head -1 \
-    | sed 's/.*=[[:space:]]*//' \
+    | sed 's/^[^=]*=[[:space:]]*//' \
     | sed 's/^"\([^"]*\)".*/\1/' \
     | tr -d '\r'
 }
