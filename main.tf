@@ -1,6 +1,26 @@
+# ─── tfvars Validation ────────────────────────────────────────────────────────
+
+resource "null_resource" "validate_tfvars" {
+  provisioner "local-exec" {
+    command     = "${path.module}/scripts/validate-tfvars.sh"
+    working_dir = path.module
+    environment = {
+      TFVARS_PATH = "${path.module}/terraform.tfvars"
+    }
+  }
+
+  triggers = {
+    cluster_name   = var.cluster_name
+    base_domain    = var.base_domain
+    pull_secret    = sha256(var.pull_secret)
+    ssh_public_key = sha256(var.ssh_public_key)
+  }
+}
+
 # ─── Installation Directory ───────────────────────────────────────────────────
 
 resource "null_resource" "install_dir" {
+  depends_on = [null_resource.validate_tfvars]
   provisioner "local-exec" {
     command = "mkdir -p ${local.install_dir}"
   }

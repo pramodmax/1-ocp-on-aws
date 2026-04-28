@@ -233,6 +233,30 @@ If `iam:SimulatePrincipalPolicy` is not allowed on your principal, the script au
 2. Download or copy your pull secret
 3. Paste it into `terraform.tfvars` as the `pull_secret` value
 
+### Validating terraform.tfvars
+
+Before running `terraform apply`, verify that all required values have been filled in and are valid. Run:
+
+```bash
+./scripts/validate-tfvars.sh
+```
+
+The script checks:
+
+| Field | What is checked |
+|-------|----------------|
+| `cluster_name` | Non-empty, not the placeholder `my-ocp-cluster`, valid format |
+| `base_domain` | Non-empty, not the placeholder `example.com` |
+| `pull_secret` | Non-empty, valid JSON with an `auths` key |
+| `ssh_public_key` | Non-empty, recognised SSH key type prefix |
+| `aws_region` | Reported (defaults to `us-east-1` if unset) |
+| `aws_profile` | Reported; warns if empty and no env vars are set |
+| Cluster sizing | Summarises master and worker count + instance types |
+
+If any required field is missing or still holds a placeholder, the script prints exactly what needs to be fixed and exits with a non-zero status, blocking `terraform apply` from proceeding.
+
+This check also runs automatically at the start of `terraform apply` — so if you forget to run it manually, Terraform will catch it before creating any resources.
+
 ---
 
 ## Quick Start
@@ -248,16 +272,19 @@ vi terraform.tfvars          # Fill in required values
 # 3. Make scripts executable
 chmod +x scripts/*.sh
 
-# 4. Verify AWS credentials have sufficient permissions
+# 4. Validate terraform.tfvars is complete
+./scripts/validate-tfvars.sh
+
+# 5. Verify AWS credentials have sufficient permissions
 ./scripts/check-aws-permissions.sh
 
-# 5. Initialise Terraform
+# 6. Initialise Terraform
 terraform init
 
-# 6. Preview the plan
+# 7. Preview the plan
 terraform plan
 
-# 7. Install the cluster (30–45 minutes)
+# 8. Install the cluster (30–45 minutes)
 terraform apply
 ```
 
@@ -374,6 +401,7 @@ A summary is printed at the end showing how many resources were freed and any th
 ├── templates/
 │   └── install-config.yaml.tpl   # OpenShift install-config template
 └── scripts/
+    ├── validate-tfvars.sh        # Check terraform.tfvars is complete before applying
     ├── check-aws-permissions.sh  # Verify IAM permissions before installing
     ├── preflight.sh              # Pre-install checks (tools, AWS auth, DNS, quotas)
     └── get-credentials.sh        # Display cluster login details
