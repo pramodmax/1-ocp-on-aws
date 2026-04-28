@@ -102,89 +102,143 @@ echo ""
 
 # ─── Prerequisites ────────────────────────────────────────────────────────────
 
-echo -e "${BOLD}  Tools${NC}"
+echo -e "${BOLD}  Step 1 of 3 — Prerequisites${NC}"
+echo ""
 
-TOOLS_OK=true
+PREREQ_FAILURES=()
+AWS_VERSION_RAW=""
 
 # jq
 if ! command -v jq &>/dev/null; then
-  echo -e "  ${RED}✘${NC}  jq not found."
-  echo "       Install: https://jqlang.github.io/jq/download/"
-  TOOLS_OK=false
+  echo -e "  ${RED}✘${NC}  jq not found"
+  PREREQ_FAILURES+=("jq_missing")
 else
   echo -e "  ${GREEN}✔${NC}  jq $(jq --version)"
 fi
 
-# aws CLI — must be v2.x or higher
+# aws CLI presence
 if ! command -v aws &>/dev/null; then
-  echo -e "  ${RED}✘${NC}  AWS CLI not found."
-  echo "       Install: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html"
-  TOOLS_OK=false
+  echo -e "  ${RED}✘${NC}  AWS CLI not found"
+  PREREQ_FAILURES+=("aws_missing")
 else
   AWS_VERSION_RAW=$(aws --version 2>&1 | awk '{print $1}' | cut -d'/' -f2)
   AWS_MAJOR=$(echo "$AWS_VERSION_RAW" | cut -d'.' -f1)
-
   if [[ "$AWS_MAJOR" -lt 2 ]]; then
-    echo -e "  ${RED}✘${NC}  AWS CLI version ${AWS_VERSION_RAW} is too old (minimum required: v2.x)."
-    echo ""
-    echo "       OpenShift IPI requires AWS CLI v2 for SSO, newer API calls,"
-    echo "       and output format compatibility."
-    echo ""
-    echo "       Upgrade steps:"
-    echo ""
-    echo "       macOS:"
-    echo "         curl -sL https://awscli.amazonaws.com/AWSCLIV2.pkg -o /tmp/AWSCLIV2.pkg"
-    echo "         sudo installer -pkg /tmp/AWSCLIV2.pkg -target /"
-    echo ""
-    echo "       Linux:"
-    echo "         curl -sL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o /tmp/awscliv2.zip"
-    echo "         unzip /tmp/awscliv2.zip -d /tmp && sudo /tmp/aws/install --update"
-    echo ""
-    echo "       Verify: aws --version"
-    echo ""
-    echo "       Full guide: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html"
-    TOOLS_OK=false
+    echo -e "  ${RED}✘${NC}  AWS CLI v${AWS_VERSION_RAW} is below the required v2.x"
+    PREREQ_FAILURES+=("aws_old:${AWS_VERSION_RAW}")
   else
-    echo -e "  ${GREEN}✔${NC}  AWS CLI v${AWS_VERSION_RAW} (meets minimum requirement of v2.x)"
+    echo -e "  ${GREEN}✔${NC}  AWS CLI v${AWS_VERSION_RAW}"
   fi
 fi
 
-if [[ "$TOOLS_OK" == "false" ]]; then
+# AWS credentials
+if [[ "${#PREREQ_FAILURES[@]}" -eq 0 ]]; then
+  IDENTITY=$(_aws sts get-caller-identity --output json 2>/dev/null) || IDENTITY=""
+  if [[ -z "$IDENTITY" ]]; then
+    echo -e "  ${RED}✘${NC}  AWS credentials not found or invalid"
+    PREREQ_FAILURES+=("aws_creds")
+  else
+    ACCOUNT=$(echo "$IDENTITY"       | jq -r '.Account')
+    PRINCIPAL_ARN=$(echo "$IDENTITY" | jq -r '.Arn')
+    USER_ID=$(echo "$IDENTITY"       | jq -r '.UserId')
+    echo -e "  ${GREEN}✔${NC}  AWS credentials valid"
+    printf "     Account  : %s\n" "$ACCOUNT"
+    printf "     Principal: %s\n" "$PRINCIPAL_ARN"
+    printf "     UserId   : %s\n" "$USER_ID"
+  fi
+fi
+
+# ── Prerequisites result ───────────────────────────────────────────────────────
+
+echo ""
+echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+
+if [[ "${#PREREQ_FAILURES[@]}" -gt 0 ]]; then
   echo ""
-  echo -e "  ${RED}Install or upgrade the tools listed above, then re-run this script.${NC}"
+  echo -e "${BOLD}${RED}╔══════════════════════════════════════════════════════════════╗${NC}"
+  echo -e "${BOLD}${RED}║   ✘  Prerequisites check failed — cannot continue            ║${NC}"
+  echo -e "${BOLD}${RED}╠══════════════════════════════════════════════════════════════╣${NC}"
+  echo -e "${BOLD}${RED}║  Fix the issues below and re-run this script.                ║${NC}"
+  echo -e "${BOLD}${RED}╚══════════════════════════════════════════════════════════════╝${NC}"
+  echo ""
+
+  for failure in "${PREREQ_FAILURES[@]}"; do
+    case "$failure" in
+      jq_missing)
+        echo -e "  ${RED}✘${NC}  ${BOLD}jq is not installed${NC}"
+        echo "     jq is required to parse AWS API responses."
+        echo ""
+        echo "     macOS : brew install jq"
+        echo "     Linux : sudo apt install jq  /  sudo yum install jq"
+        echo "     Guide : https://jqlang.github.io/jq/download/"
+        echo ""
+        ;;
+      aws_missing)
+        echo -e "  ${RED}✘${NC}  ${BOLD}AWS CLI is not installed${NC}"
+        echo "     macOS:"
+        echo "       curl -sL https://awscli.amazonaws.com/AWSCLIV2.pkg -o /tmp/AWSCLIV2.pkg"
+        echo "       sudo installer -pkg /tmp/AWSCLIV2.pkg -target /"
+        echo ""
+        echo "     Linux:"
+        echo "       curl -sL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o /tmp/awscliv2.zip"
+        echo "       unzip /tmp/awscliv2.zip -d /tmp && sudo /tmp/aws/install"
+        echo ""
+        echo "     Guide: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html"
+        echo ""
+        ;;
+      aws_old:*)
+        OLD_VER="${failure#aws_old:}"
+        echo -e "  ${RED}✘${NC}  ${BOLD}AWS CLI v${OLD_VER} is too old (minimum: v2.x)${NC}"
+        echo "     OpenShift IPI requires AWS CLI v2 for SSO support, newer API"
+        echo "     calls, and output format compatibility."
+        echo ""
+        echo "     macOS:"
+        echo "       curl -sL https://awscli.amazonaws.com/AWSCLIV2.pkg -o /tmp/AWSCLIV2.pkg"
+        echo "       sudo installer -pkg /tmp/AWSCLIV2.pkg -target /"
+        echo ""
+        echo "     Linux:"
+        echo "       curl -sL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o /tmp/awscliv2.zip"
+        echo "       unzip /tmp/awscliv2.zip -d /tmp && sudo /tmp/aws/install --update"
+        echo ""
+        echo "     Verify: aws --version"
+        echo "     Guide : https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html"
+        echo ""
+        ;;
+      aws_creds)
+        echo -e "  ${RED}✘${NC}  ${BOLD}AWS credentials not configured or invalid${NC}"
+        echo "     Option 1 — Environment variables (export before running this script):"
+        echo "       export AWS_ACCESS_KEY_ID=AKIA..."
+        echo "       export AWS_SECRET_ACCESS_KEY=..."
+        echo "       export AWS_SESSION_TOKEN=...   # only if using temporary credentials"
+        echo ""
+        echo "     Option 2 — Named profile:"
+        echo "       aws configure --profile ocp-installer"
+        echo "       ./scripts/check-aws-permissions.sh --profile ocp-installer"
+        echo ""
+        echo "     Verify: aws sts get-caller-identity"
+        echo ""
+        ;;
+    esac
+  done
+
+  echo -e "  ${BOLD}Once fixed, re-run:${NC}  ./scripts/check-aws-permissions.sh"
   echo ""
   exit 1
 fi
 
 echo ""
-
-# ─── Caller Identity ──────────────────────────────────────────────────────────
-
-echo -e "${BOLD}  Identity${NC}"
-
-IDENTITY=$(_aws sts get-caller-identity --output json 2>/dev/null) || {
-  echo -e "  ${RED}✘${NC}  Could not get caller identity. Check your credentials."
-  echo ""
-  echo "  Hints:"
-  echo "    export AWS_ACCESS_KEY_ID=AKIA..."
-  echo "    export AWS_SECRET_ACCESS_KEY=..."
-  echo "    aws configure --profile <name>  then pass --profile <name> to this script"
-  exit 1
-}
-
-ACCOUNT=$(echo "$IDENTITY"       | jq -r '.Account')
-PRINCIPAL_ARN=$(echo "$IDENTITY" | jq -r '.Arn')
-USER_ID=$(echo "$IDENTITY"       | jq -r '.UserId')
-
-echo -e "  ${GREEN}✔${NC}  Authenticated"
-printf "     Account  : %s\n" "$ACCOUNT"
-printf "     Principal: %s\n" "$PRINCIPAL_ARN"
-printf "     UserId   : %s\n" "$USER_ID"
+echo -e "${BOLD}${GREEN}╔══════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${BOLD}${GREEN}║   ✔  Prerequisites check passed                              ║${NC}"
+echo -e "${BOLD}${GREEN}╠══════════════════════════════════════════════════════════════╣${NC}"
+echo -e "${BOLD}${GREEN}║  Tools are installed and AWS credentials are valid.          ║${NC}"
+echo -e "${BOLD}${GREEN}║  Proceeding to IAM permission checks...                     ║${NC}"
+echo -e "${BOLD}${GREEN}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
 # ─── Check simulate-principal-policy access ───────────────────────────────────
 
-echo -e "${BOLD}  Checking IAM simulation access${NC}"
+echo -e "${BOLD}  Step 2 of 3 — IAM Simulation Method${NC}"
+echo ""
 
 SIMULATE_AVAILABLE=false
 SIMULATE_TEST=$(_aws iam simulate-principal-policy \
@@ -194,13 +248,18 @@ SIMULATE_TEST=$(_aws iam simulate-principal-policy \
   --output json 2>&1) || true
 
 if echo "$SIMULATE_TEST" | jq -e '.EvaluationResults' &>/dev/null; then
-  echo -e "  ${GREEN}✔${NC}  iam:SimulatePrincipalPolicy available — using policy simulation"
+  echo -e "  ${GREEN}✔${NC}  iam:SimulatePrincipalPolicy available — using full policy simulation"
   SIMULATE_AVAILABLE=true
 else
-  warn "iam:SimulatePrincipalPolicy is not allowed for this principal."
-  warn "Falling back to live describe/list calls (read-only)."
+  warn "iam:SimulatePrincipalPolicy is not available for this principal."
+  warn "Falling back to live read-only describe calls."
+  warn "Note: write permissions (CreateVpc, RunInstances etc.) cannot be verified in fallback mode."
 fi
 
+echo ""
+echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+echo -e "${BOLD}  Step 3 of 3 — Permission Checks${NC}"
 echo ""
 
 # ─── Permission Checks ────────────────────────────────────────────────────────
