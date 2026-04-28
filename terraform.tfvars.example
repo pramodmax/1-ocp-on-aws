@@ -22,87 +22,114 @@
 # Verify your active credentials at any time:
 #   aws sts get-caller-identity --profile <your-profile>
 #
-# Required IAM permissions: https://docs.openshift.com/container-platform/latest/installing/installing_aws/installing-aws-account.html
-
-aws_profile = ""                      # e.g. "default", "ocp-installer", "prod"
-                                      # Leave empty to use env vars or instance role
+# Required IAM permissions:
+#   https://docs.openshift.com/container-platform/latest/installing/installing_aws/installing-aws-account.html
+#
+# e.g. "default", "ocp-installer", "prod" — leave empty to use env vars or instance role
+aws_profile = ""
 
 # ─── Required ─────────────────────────────────────────────────────────────────
 
-cluster_name = "my-ocp-cluster"       # e.g. dev-cluster, prod-ocp, acme-ocp
+# Short lowercase name for the cluster (3–28 chars, letters/digits/hyphens, must start with a letter)
+# e.g. dev-cluster, prod-ocp, acme-ocp
+cluster_name = "my-ocp-cluster"
 
-base_domain = "example.com"           # Route53 public hosted zone must exist
+# Domain of your Route53 public hosted zone — must already exist before installing
+base_domain = "example.com"
 
-pull_secret = ""                      # Paste from https://console.redhat.com/openshift/install/pull-secret
+# Red Hat pull secret — paste the full JSON from:
+#   https://console.redhat.com/openshift/install/pull-secret
+pull_secret = ""
 
-ssh_public_key = ""                   # Contents of ~/.ssh/id_rsa.pub
+# SSH public key for node access — paste the contents of ~/.ssh/id_rsa.pub or ~/.ssh/id_ed25519.pub
+# Generate a new key if needed: ssh-keygen -t ed25519 -C "ocp-installer"
+ssh_public_key = ""
 
 # ─── Control Plane ────────────────────────────────────────────────────────────
 
-master_count = 3                      # 1 (dev/test) or 3 (production HA)
+# 1 = single-node (dev/test, no HA), 3 = standard HA (recommended for production)
+master_count = 3
 
-master_instance_type = "m5.xlarge"   # Minimum for production: m5.2xlarge
-                                      # Options: m5.xlarge | m5.2xlarge | m5.4xlarge
-                                      #          m6i.xlarge | m6i.2xlarge | m6i.4xlarge
+# EC2 instance type for master nodes
+# Options: m5.xlarge | m5.2xlarge | m5.4xlarge | m6i.xlarge | m6i.2xlarge | m6i.4xlarge
+# Minimum for production: m5.2xlarge
+master_instance_type = "m5.xlarge"
 
 # ─── Compute Nodes ────────────────────────────────────────────────────────────
 
-worker_count = 3                      # Minimum 2, recommend 3+ for production
+# Number of worker nodes — minimum 2, recommend 3+ for production
+worker_count = 3
 
-worker_instance_type = "m5.large"    # Choose based on workload:
-                                      # General purpose     : m5.large | m5.xlarge | m6i.large
-                                      # Compute intensive   : c5.xlarge | c5.2xlarge
-                                      # Memory intensive    : r5.xlarge | r5.2xlarge
-                                      #
-                                      # ── GPU / Machine Learning ──────────────────────────────
-                                      # NVIDIA T4  — inference / light training (cost-effective entry point)
-                                      #   g4dn.xlarge   (1x T4,  4 vCPU,  16 GB RAM, 16 GB GPU)
-                                      #   g4dn.2xlarge  (1x T4,  8 vCPU,  32 GB RAM, 16 GB GPU)
-                                      #   g4dn.12xlarge (4x T4, 48 vCPU, 192 GB RAM, 64 GB GPU)
-                                      #
-                                      # NVIDIA A10G — training + inference, best price/performance
-                                      #   g5.xlarge     (1x A10G,  4 vCPU,  16 GB RAM,  24 GB GPU)
-                                      #   g5.2xlarge    (1x A10G,  8 vCPU,  32 GB RAM,  24 GB GPU)
-                                      #   g5.12xlarge   (4x A10G, 48 vCPU, 192 GB RAM,  96 GB GPU)
-                                      #   g5.48xlarge   (8x A10G, 192 vCPU, 768 GB RAM, 192 GB GPU)
-                                      #
-                                      # NVIDIA V100 — deep learning training
-                                      #   p3.2xlarge    (1x V100,  8 vCPU,  61 GB RAM,  16 GB GPU)
-                                      #   p3.8xlarge    (4x V100, 32 vCPU, 244 GB RAM,  64 GB GPU)
-                                      #   p3.16xlarge   (8x V100, 64 vCPU, 488 GB RAM, 128 GB GPU)
-                                      #
-                                      # NVIDIA A100 40GB — large model training (GPT-class)
-                                      #   p4d.24xlarge  (8x A100,  96 vCPU, 1152 GB RAM, 320 GB GPU)
-                                      #
-                                      # NVIDIA H100 80GB — LLM / foundation model training
-                                      #   p5.48xlarge   (8x H100, 192 vCPU, 2048 GB RAM, 640 GB GPU)
-                                      #
-                                      # AWS Inferentia2 — cost-efficient inference (Inf2 chip)
-                                      #   inf2.xlarge   ( 1 chip,   4 vCPU,  16 GB RAM)
-                                      #   inf2.8xlarge  ( 1 chip,  32 vCPU, 192 GB RAM)
-                                      #   inf2.48xlarge (12 chips, 192 vCPU, 768 GB RAM)
-                                      #
-                                      # AWS Trainium — cost-efficient training (Trn1 chip)
-                                      #   trn1.2xlarge  ( 1 chip,   8 vCPU,  32 GB RAM)
-                                      #   trn1.32xlarge (16 chips, 128 vCPU, 512 GB RAM)
+# EC2 instance type for worker nodes — choose based on workload:
+#
+# General purpose
+#   m5.large   | m5.xlarge   | m5.2xlarge
+#   m6i.large  | m6i.xlarge  | m6i.2xlarge
+#
+# Compute intensive
+#   c5.xlarge  | c5.2xlarge  | c5.4xlarge
+#
+# Memory intensive
+#   r5.large   | r5.xlarge   | r5.2xlarge
+#
+# ── GPU / Machine Learning ───────────────────────────────────────────────────
+#
+# NVIDIA T4 — inference / light training (cost-effective entry point)
+#   g4dn.xlarge   (1x T4,  4 vCPU,  16 GB RAM, 16 GB GPU)
+#   g4dn.2xlarge  (1x T4,  8 vCPU,  32 GB RAM, 16 GB GPU)
+#   g4dn.12xlarge (4x T4, 48 vCPU, 192 GB RAM, 64 GB GPU)
+#
+# NVIDIA A10G — training + inference, best price/performance
+#   g5.xlarge    (1x A10G,   4 vCPU,  16 GB RAM,  24 GB GPU)
+#   g5.2xlarge   (1x A10G,   8 vCPU,  32 GB RAM,  24 GB GPU)
+#   g5.12xlarge  (4x A10G,  48 vCPU, 192 GB RAM,  96 GB GPU)
+#   g5.48xlarge  (8x A10G, 192 vCPU, 768 GB RAM, 192 GB GPU)
+#
+# NVIDIA V100 — deep learning training
+#   p3.2xlarge   (1x V100,  8 vCPU,  61 GB RAM,  16 GB GPU)
+#   p3.8xlarge   (4x V100, 32 vCPU, 244 GB RAM,  64 GB GPU)
+#   p3.16xlarge  (8x V100, 64 vCPU, 488 GB RAM, 128 GB GPU)
+#
+# NVIDIA A100 40GB — large model training (GPT-class)
+#   p4d.24xlarge (8x A100,  96 vCPU, 1152 GB RAM, 320 GB GPU)
+#
+# NVIDIA H100 80GB — LLM / foundation model training
+#   p5.48xlarge  (8x H100, 192 vCPU, 2048 GB RAM, 640 GB GPU)
+#
+# AWS Inferentia2 — cost-efficient inference
+#   inf2.xlarge   ( 1 chip,   4 vCPU,  16 GB RAM)
+#   inf2.8xlarge  ( 1 chip,  32 vCPU, 192 GB RAM)
+#   inf2.48xlarge (12 chips, 192 vCPU, 768 GB RAM)
+#
+# AWS Trainium — cost-efficient training
+#   trn1.2xlarge  ( 1 chip,   8 vCPU,  32 GB RAM)
+#   trn1.32xlarge (16 chips, 128 vCPU, 512 GB RAM)
+worker_instance_type = "m5.large"
 
 # ─── AWS ──────────────────────────────────────────────────────────────────────
 
 aws_region = "us-east-1"
 
-availability_zones = []               # Leave empty for auto-selection, or specify:
-                                      # ["us-east-1a", "us-east-1b", "us-east-1c"]
+# Leave empty for auto-selection, or specify explicit AZs:
+#   ["us-east-1a", "us-east-1b", "us-east-1c"]
+availability_zones = []
 
 # ─── Optional ─────────────────────────────────────────────────────────────────
 
 ocp_version = "4.16.3"
 
-publish = "External"                  # External (internet-facing) or Internal (VPC only)
+# External = internet-facing API and console, Internal = private VPC only
+publish = "External"
 
-network_type = "OVNKubernetes"        # OVNKubernetes (default) or OpenShiftSDN
+# OVNKubernetes (modern default) or OpenShiftSDN (legacy)
+network_type = "OVNKubernetes"
 
-master_root_volume_size = 120         # GB
-worker_root_volume_size = 120         # GB
-root_volume_type        = "gp3"       # gp2 | gp3 | io1 | io2
+# Root volume sizes in GB
+master_root_volume_size = 120
+worker_root_volume_size = 120
 
-fips_enabled = false                  # true for US government / compliance requirements
+# EBS volume type — gp2 | gp3 | io1 | io2
+root_volume_type = "gp3"
+
+# Set to true for US government / FIPS 140-2 compliance requirements
+fips_enabled = false

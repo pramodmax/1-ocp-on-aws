@@ -51,13 +51,14 @@ echo ""
 # ─── Parser ───────────────────────────────────────────────────────────────────
 
 # Extracts a single-line HCL string value: var_name = "value"
+# Captures only the content between the first pair of double-quotes so that
+# inline comments (# ...) after the closing quote are never included.
 get_var() {
   local key="$1"
   grep -E "^[[:space:]]*${key}[[:space:]]*=" "$TFVARS_FILE" 2>/dev/null \
     | head -1 \
-    | sed "s/^[^=]*=[[:space:]]*//" \
-    | sed 's/^"//; s/"[[:space:]]*$//' \
-    | sed 's/[[:space:]]*#.*//' \
+    | sed 's/.*=[[:space:]]*//' \
+    | sed 's/^"\([^"]*\)".*/\1/' \
     | tr -d '\r'
 }
 
