@@ -133,8 +133,273 @@ resource "null_resource" "install_cluster" {
     EOT
   }
 
+  # ── Destroy-time: Phase 1 — openshift-install destroy cluster ────────────────
+  provisioner "local-exec" {
+    when    = destroy
+    command = <<-EOT
+      set -e
+      INSTALL_DIR="${self.triggers.install_dir}"
+      CLUSTER_NAME="${self.triggers.cluster_name}"
+      CLUSTER_TAG="kubernetes.io/cluster/$${CLUSTER_NAME}"
+
+      echo ""
+      echo "╔══════════════════════════════════════════════════════════════╗"
+      echo "║           OpenShift Cluster Teardown — Phase 1/3            ║"
+      echo "║           openshift-install destroy cluster                 ║"
+      echo "╚══════════════════════════════════════════════════════════════╝"
+      echo ""
+
+      if [ -d "$INSTALL_DIR" ]; then
+        openshift-install destroy cluster \
+          --dir="$INSTALL_DIR" \
+          --log-level=info || echo "Installer destroy exited with errors — proceeding to orphan cleanup."
+      else
+        echo "Install directory not found ($INSTALL_DIR). Skipping installer destroy."
+      fi
+    EOT
+    environment = {
+      AWS_DEFAULT_REGION = self.triggers.aws_region
+    }
+  }
+
+  # ── Destroy-time: Phase 2 — Orphaned AWS resource cleanup ─────────────────
+  provisioner "local-exec" {
+    when    = destroy
+    command = <<-EOT
+      set -e
+      CLUSTER_NAME="${self.triggers.cluster_name}"
+      AWS_REGION="${self.triggers.aws_region}"
+      CLUSTER_TAG="kubernetes.io/cluster/$${CLUSTER_NAME}"
+      TAG_FILTER="Name=tag:$${CLUSTER_TAG},Values=owned"
+      REMOVED=0
+      WARNED=0
+
+      ok()   { echo "  ✔  $1"; }
+      gone() { echo "  ⚠  $1 — already removed or not found"; }
+
+      remove() {
+        local label="$1"; shift
+        if "$@" >/dev/null 2>&1; then ok "$label"; REMOVED=$((REMOVED+1))
+        else gone "$label"; WARNED=$((WARNED+1)); fi
+      }
+
+      echo ""
+      echo "╔══════════════════════════════════════════════════════════════╗"
+      echo "║           OpenShift Cluster Teardown — Phase 2/3            ║"
+      echo "║           Orphaned AWS Resource Cleanup                     ║"
+      echo "╚══════════════════════════════════════════════════════════════╝"
+      echo ""
+      echo "  Tag filter: $${CLUSTER_TAG}=owned | Region: $${AWS_REGION}"
+      echo ""
+
+      # ── EC2 Instances ───────────────────────────────────────────────────────
+      echo "  EC2 Instances"
+      IDS=$(aws ec2 describe-instances --region "$AWS_REGION" \
+        --filters "$${TAG_FILTER}" "Name=instance-state-name,Values=running,stopped,pending" \
+        --query 'Reservations[].Instances[].InstanceId' --output text 2>/dev/null || true)
+      if [ -n "$IDS" ]; then
+        remove "EC2 instances ($IDS)" \
+          aws ec2 terminate-instances --region "$AWS_REGION" --instance-ids $IDS
+        aws ec2 wait instance-terminated --region "$AWS_REGION" --instance-ids $IDS 2>/dev/null || true
+      else ok "No orphaned EC2 instances"; fi
+
+      # ── ALB / NLB ───────────────────────────────────────────────────────────
+      echo "  Load Balancers (ALB/NLB)"
+      for ARN in $(aws elbv2 describe-load-balancers --region "$AWS_REGION" \
+        --query 'LoadBalancers[].LoadBalancerArn' --output text 2>/dev/null || true); do
+        TAG=$(aws elbv2 describe-tags --region "$AWS_REGION" --resource-arns "$ARN" \
+          --query "TagDescriptions[].Tags[?Key=='$${CLUSTER_TAG}'].Value" --output text 2>/dev/null || true)
+        [ "$TAG" = "owned" ] && remove "ALB/NLB $${ARN##*/}" \
+          aws elbv2 delete-load-balancer --region "$AWS_REGION" --load-balancer-arn "$ARN"
+      done
+
+      # ── Classic ELBs ────────────────────────────────────────────────────────
+      echo "  Classic Load Balancers"
+      for LB in $(aws elb describe-load-balancers --region "$AWS_REGION" \
+        --query 'LoadBalancerDescriptions[].LoadBalancerName' --output text 2>/dev/null || true); do
+        TAG=$(aws elb describe-tags --region "$AWS_REGION" --load-balancer-names "$LB" \
+          --query "TagDescriptions[].Tags[?Key=='$${CLUSTER_TAG}'].Value" --output text 2>/dev/null || true)
+        [ "$TAG" = "owned" ] && remove "Classic ELB $LB" \
+          aws elb delete-load-balancer --region "$AWS_REGION" --load-balancer-name "$LB"
+      done
+
+      # ── S3 Buckets ──────────────────────────────────────────────────────────
+      echo "  S3 Buckets"
+      for BUCKET in $(aws s3api list-buckets --query 'Buckets[].Name' --output text 2>/dev/null || true); do
+        if echo "$BUCKET" | grep -q "$${CLUSTER_NAME}"; then
+          aws s3 rm "s3://$${BUCKET}" --recursive 2>/dev/null || true
+          remove "S3 bucket $BUCKET" aws s3api delete-bucket --bucket "$BUCKET"
+        fi
+      done
+
+      # ── NAT Gateways ────────────────────────────────────────────────────────
+      echo "  NAT Gateways"
+      IDS=$(aws ec2 describe-nat-gateways --region "$AWS_REGION" \
+        --filter "$${TAG_FILTER}" "Name=state,Values=available,pending" \
+        --query 'NatGateways[].NatGatewayId' --output text 2>/dev/null || true)
+      if [ -n "$IDS" ]; then
+        for ID in $IDS; do
+          remove "NAT gateway $ID" aws ec2 delete-nat-gateway --region "$AWS_REGION" --nat-gateway-id "$ID"
+        done
+        sleep 20
+      else ok "No orphaned NAT gateways"; fi
+
+      # ── Elastic IPs ─────────────────────────────────────────────────────────
+      echo "  Elastic IPs"
+      for ID in $(aws ec2 describe-addresses --region "$AWS_REGION" \
+        --filters "$${TAG_FILTER}" --query 'Addresses[].AllocationId' --output text 2>/dev/null || true); do
+        remove "Elastic IP $ID" aws ec2 release-address --region "$AWS_REGION" --allocation-id "$ID"
+      done
+
+      # ── Security Groups ─────────────────────────────────────────────────────
+      echo "  Security Groups"
+      for ID in $(aws ec2 describe-security-groups --region "$AWS_REGION" \
+        --filters "$${TAG_FILTER}" --query 'SecurityGroups[].GroupId' --output text 2>/dev/null || true); do
+        # Revoke rules to clear cross-references
+        INGRESS=$(aws ec2 describe-security-groups --region "$AWS_REGION" --group-ids "$ID" \
+          --query 'SecurityGroups[0].IpPermissions' --output json 2>/dev/null || echo "[]")
+        EGRESS=$(aws ec2 describe-security-groups --region "$AWS_REGION" --group-ids "$ID" \
+          --query 'SecurityGroups[0].IpPermissionsEgress' --output json 2>/dev/null || echo "[]")
+        [ "$INGRESS" != "[]" ] && aws ec2 revoke-security-group-ingress --region "$AWS_REGION" \
+          --group-id "$ID" --ip-permissions "$INGRESS" 2>/dev/null || true
+        [ "$EGRESS"  != "[]" ] && aws ec2 revoke-security-group-egress --region "$AWS_REGION" \
+          --group-id "$ID" --ip-permissions "$EGRESS" 2>/dev/null || true
+        remove "Security group $ID" aws ec2 delete-security-group --region "$AWS_REGION" --group-id "$ID"
+      done
+
+      # ── VPC Endpoints ───────────────────────────────────────────────────────
+      echo "  VPC Endpoints"
+      IDS=$(aws ec2 describe-vpc-endpoints --region "$AWS_REGION" \
+        --filters "$${TAG_FILTER}" "Name=vpc-endpoint-state,Values=available,pending" \
+        --query 'VpcEndpoints[].VpcEndpointId' --output text 2>/dev/null || true)
+      [ -n "$IDS" ] && remove "VPC endpoints" \
+        aws ec2 delete-vpc-endpoints --region "$AWS_REGION" --vpc-endpoint-ids $IDS \
+        || ok "No orphaned VPC endpoints"
+
+      # ── Subnets ─────────────────────────────────────────────────────────────
+      echo "  Subnets"
+      for ID in $(aws ec2 describe-subnets --region "$AWS_REGION" \
+        --filters "$${TAG_FILTER}" --query 'Subnets[].SubnetId' --output text 2>/dev/null || true); do
+        remove "Subnet $ID" aws ec2 delete-subnet --region "$AWS_REGION" --subnet-id "$ID"
+      done
+
+      # ── Route Tables ────────────────────────────────────────────────────────
+      echo "  Route Tables"
+      for ID in $(aws ec2 describe-route-tables --region "$AWS_REGION" \
+        --filters "$${TAG_FILTER}" \
+        --query 'RouteTables[?Associations[0].Main!=`true`].RouteTableId' \
+        --output text 2>/dev/null || true); do
+        for ASSOC in $(aws ec2 describe-route-tables --region "$AWS_REGION" --route-table-ids "$ID" \
+          --query 'RouteTables[0].Associations[?Main!=`true`].RouteTableAssociationId' \
+          --output text 2>/dev/null || true); do
+          aws ec2 disassociate-route-table --region "$AWS_REGION" --association-id "$ASSOC" 2>/dev/null || true
+        done
+        remove "Route table $ID" aws ec2 delete-route-table --region "$AWS_REGION" --route-table-id "$ID"
+      done
+
+      # ── Internet Gateways ───────────────────────────────────────────────────
+      echo "  Internet Gateways"
+      for ID in $(aws ec2 describe-internet-gateways --region "$AWS_REGION" \
+        --filters "$${TAG_FILTER}" --query 'InternetGateways[].InternetGatewayId' \
+        --output text 2>/dev/null || true); do
+        VPC=$(aws ec2 describe-internet-gateways --region "$AWS_REGION" --internet-gateway-ids "$ID" \
+          --query 'InternetGateways[0].Attachments[0].VpcId' --output text 2>/dev/null || true)
+        [ -n "$VPC" ] && [ "$VPC" != "None" ] && \
+          aws ec2 detach-internet-gateway --region "$AWS_REGION" \
+          --internet-gateway-id "$ID" --vpc-id "$VPC" 2>/dev/null || true
+        remove "Internet gateway $ID" aws ec2 delete-internet-gateway --region "$AWS_REGION" --internet-gateway-id "$ID"
+      done
+
+      # ── VPCs ────────────────────────────────────────────────────────────────
+      echo "  VPCs"
+      for ID in $(aws ec2 describe-vpcs --region "$AWS_REGION" \
+        --filters "$${TAG_FILTER}" --query 'Vpcs[].VpcId' --output text 2>/dev/null || true); do
+        remove "VPC $ID" aws ec2 delete-vpc --region "$AWS_REGION" --vpc-id "$ID"
+      done
+
+      # ── EBS Volumes ─────────────────────────────────────────────────────────
+      echo "  EBS Volumes"
+      for ID in $(aws ec2 describe-volumes --region "$AWS_REGION" \
+        --filters "$${TAG_FILTER}" "Name=status,Values=available" \
+        --query 'Volumes[].VolumeId' --output text 2>/dev/null || true); do
+        remove "EBS volume $ID" aws ec2 delete-volume --region "$AWS_REGION" --volume-id "$ID"
+      done
+
+      # ── IAM Roles ───────────────────────────────────────────────────────────
+      echo "  IAM Roles"
+      for ROLE in $(aws iam list-roles \
+        --query "Roles[?contains(RoleName, '$${CLUSTER_NAME}')].RoleName" \
+        --output text 2>/dev/null || true); do
+        for PA in $(aws iam list-attached-role-policies --role-name "$ROLE" \
+          --query 'AttachedPolicies[].PolicyArn' --output text 2>/dev/null || true); do
+          aws iam detach-role-policy --role-name "$ROLE" --policy-arn "$PA" 2>/dev/null || true
+        done
+        for IP in $(aws iam list-instance-profiles-for-role --role-name "$ROLE" \
+          --query 'InstanceProfiles[].InstanceProfileName' --output text 2>/dev/null || true); do
+          aws iam remove-role-from-instance-profile --role-name "$ROLE" --instance-profile-name "$IP" 2>/dev/null || true
+          aws iam delete-instance-profile --instance-profile-name "$IP" 2>/dev/null || true
+        done
+        for INLINE in $(aws iam list-role-policies --role-name "$ROLE" \
+          --query 'PolicyNames[]' --output text 2>/dev/null || true); do
+          aws iam delete-role-policy --role-name "$ROLE" --policy-name "$INLINE" 2>/dev/null || true
+        done
+        remove "IAM role $ROLE" aws iam delete-role --role-name "$ROLE"
+      done
+
+      # ── Route53 Private Zones ───────────────────────────────────────────────
+      echo "  Route53 Private Hosted Zones"
+      for ZONE_PATH in $(aws route53 list-hosted-zones \
+        --query "HostedZones[?contains(Name,'$${CLUSTER_NAME}')&&Config.PrivateZone==\`true\`].Id" \
+        --output text 2>/dev/null || true); do
+        ZID="$${ZONE_PATH##*/}"
+        RECORDS=$(aws route53 list-resource-record-sets --hosted-zone-id "$ZID" \
+          --query "ResourceRecordSets[?Type!='SOA'&&Type!='NS']" --output json 2>/dev/null || echo "[]")
+        if [ "$RECORDS" != "[]" ] && [ "$RECORDS" != "null" ]; then
+          CHANGES=$(echo "$RECORDS" | jq '[.[]|{Action:"DELETE",ResourceRecordSet:.}]')
+          aws route53 change-resource-record-sets --hosted-zone-id "$ZID" \
+            --change-batch "{\"Changes\":$CHANGES}" 2>/dev/null || true
+        fi
+        remove "Route53 private zone $ZID" aws route53 delete-hosted-zone --id "$ZID"
+      done
+
+      # ── Phase 3: Local cleanup ───────────────────────────────────────────────
+      echo ""
+      echo "╔══════════════════════════════════════════════════════════════╗"
+      echo "║           OpenShift Cluster Teardown — Phase 3/3            ║"
+      echo "║           Local Directory Cleanup                           ║"
+      echo "╚══════════════════════════════════════════════════════════════╝"
+      INSTALL_DIR="${self.triggers.install_dir}"
+      if [ -d "$INSTALL_DIR" ]; then
+        rm -rf "$INSTALL_DIR"
+        ok "Removed install directory: $INSTALL_DIR"
+      else
+        ok "Install directory already removed"
+      fi
+
+      echo ""
+      echo "╔══════════════════════════════════════════════════════════════╗"
+      echo "║                    Teardown Summary                         ║"
+      echo "╠══════════════════════════════════════════════════════════════╣"
+      printf "║  Cluster         : %-42s ║\n" "$CLUSTER_NAME"
+      printf "║  Resources freed : %-42s ║\n" "$REMOVED"
+      if [ "$WARNED" -gt 0 ]; then
+        printf "║  Already gone    : %-42s ║\n" "$WARNED"
+      fi
+      echo "╠══════════════════════════════════════════════════════════════╣"
+      echo "║  ✔  Cluster fully destroyed. All resources released.        ║"
+      echo "╚══════════════════════════════════════════════════════════════╝"
+      echo ""
+    EOT
+    environment = {
+      AWS_DEFAULT_REGION = self.triggers.aws_region
+    }
+  }
+
   triggers = {
-    preflight_id = null_resource.preflight_check.id
+    preflight_id  = null_resource.preflight_check.id
+    cluster_name  = var.cluster_name
+    aws_region    = var.aws_region
+    install_dir   = local.install_dir
   }
 }
 

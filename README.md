@@ -195,13 +195,19 @@ oc get clusteroperators
 
 ## Destroy
 
-Use the provided script to ensure proper cleanup of all AWS resources:
+Run `terraform destroy` — the teardown is fully integrated and runs in three phases automatically:
 
 ```bash
-./scripts/destroy.sh <cluster-name>
+terraform destroy
 ```
 
-Do **not** use `terraform destroy` directly — the cluster must be destroyed via `openshift-install destroy cluster` first, otherwise AWS resources (load balancers, Route53 records, S3 buckets) will be orphaned and may block future installs.
+| Phase | What happens |
+|-------|-------------|
+| **1 — openshift-install destroy** | Destroys the cluster via the official installer (handles the bulk of EC2, LBs, VPC, Route53, S3, IAM) |
+| **2 — Orphan cleanup** | Scans for any resources tagged `kubernetes.io/cluster/<name>=owned` that the installer missed and removes them: EC2 instances, ALB/NLB/Classic ELBs, S3 buckets, NAT gateways, Elastic IPs, security groups, VPC endpoints, subnets, route tables, internet gateways, VPCs, EBS volumes, IAM roles & instance profiles, Route53 private zones |
+| **3 — Local cleanup** | Removes the `clusters/<name>/` directory (kubeconfig, credentials, logs) |
+
+A summary is printed at the end showing how many resources were freed and any that were already gone.
 
 ---
 
@@ -220,8 +226,7 @@ Do **not** use `terraform destroy` directly — the cluster must be destroyed vi
 └── scripts/
     ├── check-aws-permissions.sh  # Verify IAM permissions before installing
     ├── preflight.sh              # Pre-install checks (tools, AWS auth, DNS, quotas)
-    ├── get-credentials.sh        # Display cluster login details
-    └── destroy.sh                # Safe cluster teardown
+    └── get-credentials.sh        # Display cluster login details
 ```
 
 ---
