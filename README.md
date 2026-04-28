@@ -320,7 +320,8 @@ See [`variables.tf`](variables.tf) for the full list with validation rules and d
 | `m5.2xlarge` | 8 | 32 GB | Production (recommended) |
 | `m6i.2xlarge` | 8 | 32 GB | Production (latest gen) |
 
-### Worker Nodes
+### Worker Nodes — General Purpose
+
 | Type | vCPU | RAM | Use case |
 |------|------|-----|----------|
 | `m5.large` | 2 | 8 GB | Dev / light workloads |
@@ -328,7 +329,86 @@ See [`variables.tf`](variables.tf) for the full list with validation rules and d
 | `m6i.xlarge` | 4 | 16 GB | General purpose (latest gen) |
 | `c5.2xlarge` | 8 | 16 GB | Compute intensive |
 | `r5.xlarge` | 4 | 32 GB | Memory intensive |
-| `g4dn.xlarge` | 4 | 16 GB | GPU / AI/ML workloads |
+
+### Worker Nodes — GPU / Machine Learning
+
+> **Note:** GPU instance types require service quota increases in your AWS account before use.
+> Request limits at: **AWS Console → Service Quotas → Amazon EC2 → Running On-Demand [instance family] instances**
+
+#### NVIDIA T4 — `g4dn` family
+Best for: **inference workloads, model serving, light fine-tuning**
+
+| Type | vCPU | RAM | GPU | GPU RAM | Recommended for |
+|------|------|-----|-----|---------|-----------------|
+| `g4dn.xlarge` | 4 | 16 GB | 1× T4 | 16 GB | Entry-level inference, model evaluation |
+| `g4dn.2xlarge` | 8 | 32 GB | 1× T4 | 16 GB | Single-model serving, batch inference |
+| `g4dn.4xlarge` | 16 | 64 GB | 1× T4 | 16 GB | High-throughput inference |
+| `g4dn.12xlarge` | 48 | 192 GB | 4× T4 | 64 GB | Multi-model serving, parallel inference |
+
+#### NVIDIA A10G — `g5` family
+Best for: **training + inference, best price/performance for most ML teams**
+
+| Type | vCPU | RAM | GPU | GPU RAM | Recommended for |
+|------|------|-----|-----|---------|-----------------|
+| `g5.xlarge` | 4 | 16 GB | 1× A10G | 24 GB | Fine-tuning smaller models (7B–13B), inference |
+| `g5.2xlarge` | 8 | 32 GB | 1× A10G | 24 GB | Fine-tuning, real-time inference |
+| `g5.4xlarge` | 16 | 64 GB | 1× A10G | 24 GB | Computer vision, NLP training |
+| `g5.12xlarge` | 48 | 192 GB | 4× A10G | 96 GB | Distributed training, large model fine-tuning |
+| `g5.48xlarge` | 192 | 768 GB | 8× A10G | 192 GB | Large-scale distributed training |
+
+#### NVIDIA V100 — `p3` family
+Best for: **established deep learning training pipelines**
+
+| Type | vCPU | RAM | GPU | GPU RAM | Recommended for |
+|------|------|-----|-----|---------|-----------------|
+| `p3.2xlarge` | 8 | 61 GB | 1× V100 | 16 GB | Single-GPU training, research |
+| `p3.8xlarge` | 32 | 244 GB | 4× V100 | 64 GB | Multi-GPU training, CV models |
+| `p3.16xlarge` | 64 | 488 GB | 8× V100 | 128 GB | Large-scale training |
+
+#### NVIDIA A100 40GB — `p4d` family
+Best for: **GPT-class and billion-parameter model training**
+
+| Type | vCPU | RAM | GPU | GPU RAM | Recommended for |
+|------|------|-----|-----|---------|-----------------|
+| `p4d.24xlarge` | 96 | 1152 GB | 8× A100 | 320 GB | Foundation model training, large LLM fine-tuning |
+
+#### NVIDIA H100 80GB — `p5` family
+Best for: **frontier LLM training, largest foundation models**
+
+| Type | vCPU | RAM | GPU | GPU RAM | Recommended for |
+|------|------|-----|-----|---------|-----------------|
+| `p5.48xlarge` | 192 | 2048 GB | 8× H100 | 640 GB | State-of-the-art LLM training, multimodal models |
+
+#### AWS Inferentia2 — `inf2` family
+Best for: **cost-optimised production inference (up to 4× cheaper than GPU instances)**
+
+| Type | vCPU | RAM | Chips | Recommended for |
+|------|------|-----|-------|-----------------|
+| `inf2.xlarge` | 4 | 16 GB | 1 | Lightweight inference, API endpoints |
+| `inf2.8xlarge` | 32 | 192 GB | 1 | High-throughput single-model serving |
+| `inf2.24xlarge` | 96 | 384 GB | 6 | Multi-model inference at scale |
+| `inf2.48xlarge` | 192 | 768 GB | 12 | Largest models, maximum throughput |
+
+#### AWS Trainium — `trn1` family
+Best for: **cost-optimised training of transformers and deep learning models**
+
+| Type | vCPU | RAM | Chips | Recommended for |
+|------|------|-----|-------|-----------------|
+| `trn1.2xlarge` | 8 | 32 GB | 1 | Single-chip training experiments |
+| `trn1.32xlarge` | 128 | 512 GB | 16 | Large-scale distributed model training |
+
+### Choosing the Right GPU Instance
+
+| Goal | Recommended type | Why |
+|------|-----------------|-----|
+| **Getting started with ML on OCP** | `g4dn.xlarge` | Lowest cost, 16 GB GPU fits most OSS models |
+| **Serving a 7B–13B LLM** | `g5.2xlarge` | 24 GB A10G GPU handles 13B models in FP16 |
+| **Fine-tuning a 13B–70B LLM** | `g5.12xlarge` | 4× A10G with tensor parallelism |
+| **Training from scratch** | `p3.8xlarge` or `g5.48xlarge` | V100 / A10G for established pipelines |
+| **GPT-4-class model training** | `p4d.24xlarge` | 8× A100, NVLink interconnect |
+| **Frontier LLM training** | `p5.48xlarge` | 8× H100, highest throughput available on AWS |
+| **Cost-efficient inference in production** | `inf2.8xlarge` | Inferentia2 is purpose-built for inference |
+| **Cost-efficient training in production** | `trn1.32xlarge` | Trainium is purpose-built for transformer training |
 
 ---
 

@@ -105,21 +105,44 @@ variable "worker_instance_type" {
   description = <<-EOT
     EC2 instance type for worker nodes.
     Choose based on workload profile:
-    - General purpose: m5.large / m5.xlarge / m6i.large
-    - Compute intensive: c5.xlarge / c5.2xlarge
-    - Memory intensive: r5.xlarge / r5.2xlarge
+    - General purpose   : m5.large / m5.xlarge / m6i.large
+    - Compute intensive : c5.xlarge / c5.2xlarge
+    - Memory intensive  : r5.xlarge / r5.2xlarge
+    - GPU — Inference   : g4dn.xlarge (T4) / g5.xlarge (A10G)
+    - GPU — Training    : g5.12xlarge (4x A10G) / p3.2xlarge (V100) / p3.8xlarge (4x V100)
+    - GPU — Large model : p4d.24xlarge (8x A100 40GB) / p5.48xlarge (8x H100 80GB)
+    - AWS Inferentia2   : inf2.xlarge / inf2.8xlarge / inf2.48xlarge
+    - AWS Trainium      : trn1.2xlarge / trn1.32xlarge
   EOT
   type        = string
   default     = "m5.large"
 
   validation {
     condition = contains([
+      # General purpose
       "m5.large", "m5.xlarge", "m5.2xlarge", "m5.4xlarge",
       "m6i.large", "m6i.xlarge", "m6i.2xlarge", "m6i.4xlarge",
       "m6a.large", "m6a.xlarge", "m6a.2xlarge",
+      # Compute intensive
       "c5.xlarge", "c5.2xlarge", "c5.4xlarge",
+      # Memory intensive
       "r5.large", "r5.xlarge", "r5.2xlarge",
-      "g4dn.xlarge", "g4dn.2xlarge"
+      # GPU — NVIDIA T4 (inference, light training)
+      "g4dn.xlarge", "g4dn.2xlarge", "g4dn.4xlarge", "g4dn.8xlarge",
+      "g4dn.12xlarge", "g4dn.16xlarge",
+      # GPU — NVIDIA A10G (training + inference)
+      "g5.xlarge", "g5.2xlarge", "g5.4xlarge", "g5.8xlarge",
+      "g5.12xlarge", "g5.48xlarge",
+      # GPU — NVIDIA V100 (deep learning training)
+      "p3.2xlarge", "p3.8xlarge", "p3.16xlarge",
+      # GPU — NVIDIA A100 40GB (large model training)
+      "p4d.24xlarge",
+      # GPU — NVIDIA H100 80GB (LLM training)
+      "p5.48xlarge",
+      # AWS Inferentia2 (cost-efficient inference)
+      "inf2.xlarge", "inf2.8xlarge", "inf2.24xlarge", "inf2.48xlarge",
+      # AWS Trainium (cost-efficient training)
+      "trn1.2xlarge", "trn1.32xlarge"
     ], var.worker_instance_type)
     error_message = "Invalid worker instance type. See variable description for supported types."
   }
