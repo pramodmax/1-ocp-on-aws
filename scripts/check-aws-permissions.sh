@@ -104,13 +104,58 @@ echo ""
 
 echo -e "${BOLD}  Tools${NC}"
 
-for tool in aws jq; do
-  if ! command -v "$tool" &>/dev/null; then
-    echo -e "  ${RED}✘${NC}  $tool not found — install it before continuing."
-    exit 1
+TOOLS_OK=true
+
+# jq
+if ! command -v jq &>/dev/null; then
+  echo -e "  ${RED}✘${NC}  jq not found."
+  echo "       Install: https://jqlang.github.io/jq/download/"
+  TOOLS_OK=false
+else
+  echo -e "  ${GREEN}✔${NC}  jq $(jq --version)"
+fi
+
+# aws CLI — must be v2.x or higher
+if ! command -v aws &>/dev/null; then
+  echo -e "  ${RED}✘${NC}  AWS CLI not found."
+  echo "       Install: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html"
+  TOOLS_OK=false
+else
+  AWS_VERSION_RAW=$(aws --version 2>&1 | awk '{print $1}' | cut -d'/' -f2)
+  AWS_MAJOR=$(echo "$AWS_VERSION_RAW" | cut -d'.' -f1)
+
+  if [[ "$AWS_MAJOR" -lt 2 ]]; then
+    echo -e "  ${RED}✘${NC}  AWS CLI version ${AWS_VERSION_RAW} is too old (minimum required: v2.x)."
+    echo ""
+    echo "       OpenShift IPI requires AWS CLI v2 for SSO, newer API calls,"
+    echo "       and output format compatibility."
+    echo ""
+    echo "       Upgrade steps:"
+    echo ""
+    echo "       macOS:"
+    echo "         curl -sL https://awscli.amazonaws.com/AWSCLIV2.pkg -o /tmp/AWSCLIV2.pkg"
+    echo "         sudo installer -pkg /tmp/AWSCLIV2.pkg -target /"
+    echo ""
+    echo "       Linux:"
+    echo "         curl -sL https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip -o /tmp/awscliv2.zip"
+    echo "         unzip /tmp/awscliv2.zip -d /tmp && sudo /tmp/aws/install --update"
+    echo ""
+    echo "       Verify: aws --version"
+    echo ""
+    echo "       Full guide: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html"
+    TOOLS_OK=false
+  else
+    echo -e "  ${GREEN}✔${NC}  AWS CLI v${AWS_VERSION_RAW} (meets minimum requirement of v2.x)"
   fi
-done
-echo -e "  ${GREEN}✔${NC}  aws CLI and jq found"
+fi
+
+if [[ "$TOOLS_OK" == "false" ]]; then
+  echo ""
+  echo -e "  ${RED}Install or upgrade the tools listed above, then re-run this script.${NC}"
+  echo ""
+  exit 1
+fi
+
 echo ""
 
 # ─── Caller Identity ──────────────────────────────────────────────────────────
@@ -295,35 +340,226 @@ echo ""
 echo -e "${BOLD}╔══════════════════════════════════════════════════════════════╗${NC}"
 echo -e "${BOLD}║                        Summary                              ║${NC}"
 echo -e "${BOLD}╠══════════════════════════════════════════════════════════════╣${NC}"
-printf "${BOLD}║  Passed: %-2s / %-2s groups%-38s║${NC}\n" "$PASSED_GROUPS" "$TOTAL_GROUPS" ""
+printf "${BOLD}║  Passed : %-2s / %-2s groups%-37s║${NC}\n" "$PASSED_GROUPS" "$TOTAL_GROUPS" ""
+printf "${BOLD}║  Failed : %-2s / %-2s groups%-37s║${NC}\n" "${#FAILED_GROUPS[@]}" "$TOTAL_GROUPS" ""
+echo -e "${BOLD}╚══════════════════════════════════════════════════════════════╝${NC}"
 
-if [[ ${#FAILED_GROUPS[@]} -gt 0 ]]; then
-  echo -e "${BOLD}╠══════════════════════════════════════════════════════════════╣${NC}"
-  echo -e "${BOLD}║  Failed groups:                                              ║${NC}"
-  for g in "${FAILED_GROUPS[@]}"; do
-    printf "║    ${RED}✘${NC} %-57s║\n" "$g"
-  done
+# ─── All Passed ───────────────────────────────────────────────────────────────
 
-  if [[ ${#FAILED_ACTIONS[@]} -gt 0 ]]; then
-    echo -e "${BOLD}╠══════════════════════════════════════════════════════════════╣${NC}"
-    echo -e "${BOLD}║  Denied actions:                                             ║${NC}"
-    for a in "${FAILED_ACTIONS[@]}"; do
-      printf "║    ${RED}✘${NC} %-57s║\n" "$a"
-    done
-  fi
-
-  echo -e "${BOLD}╠══════════════════════════════════════════════════════════════╣${NC}"
-  echo -e "${BOLD}║  ${RED}RESULT: Insufficient permissions — do not proceed.${NC}${BOLD}           ║${NC}"
-  echo -e "${BOLD}╠══════════════════════════════════════════════════════════════╣${NC}"
-  echo -e "${BOLD}║  Reference: docs.openshift.com/container-platform/latest/   ║${NC}"
-  echo -e "${BOLD}║    installing/installing_aws/installing-aws-account.html     ║${NC}"
-  echo -e "${BOLD}╚══════════════════════════════════════════════════════════════╝${NC}"
+if [[ ${#FAILED_GROUPS[@]} -eq 0 ]]; then
   echo ""
-  exit 1
-else
-  echo -e "${BOLD}╠══════════════════════════════════════════════════════════════╣${NC}"
-  echo -e "${BOLD}║  ${GREEN}RESULT: All checks passed — credentials are sufficient.${NC}${BOLD}      ║${NC}"
-  echo -e "${BOLD}╚══════════════════════════════════════════════════════════════╝${NC}"
+  echo -e "${BOLD}${GREEN}╔══════════════════════════════════════════════════════════════╗${NC}"
+  echo -e "${BOLD}${GREEN}║        ✔  All requirements are present. Ready to go!         ║${NC}"
+  echo -e "${BOLD}${GREEN}╠══════════════════════════════════════════════════════════════╣${NC}"
+  echo -e "${BOLD}${GREEN}║  Your AWS credentials have all the IAM permissions needed    ║${NC}"
+  echo -e "${BOLD}${GREEN}║  to create an OpenShift cluster on AWS.                      ║${NC}"
+  echo -e "${BOLD}${GREEN}╠══════════════════════════════════════════════════════════════╣${NC}"
+  echo -e "${BOLD}${GREEN}║  Next steps:                                                 ║${NC}"
+  echo -e "${BOLD}${GREEN}║                                                              ║${NC}"
+  echo -e "${BOLD}${GREEN}║  1. Copy and fill in your variables:                         ║${NC}"
+  echo -e "${BOLD}${GREEN}║       cp terraform.tfvars.example terraform.tfvars           ║${NC}"
+  echo -e "${BOLD}${GREEN}║                                                              ║${NC}"
+  echo -e "${BOLD}${GREEN}║  2. Initialise Terraform:                                    ║${NC}"
+  echo -e "${BOLD}${GREEN}║       terraform init                                         ║${NC}"
+  echo -e "${BOLD}${GREEN}║                                                              ║${NC}"
+  echo -e "${BOLD}${GREEN}║  3. Preview the deployment plan:                             ║${NC}"
+  echo -e "${BOLD}${GREEN}║       terraform plan                                         ║${NC}"
+  echo -e "${BOLD}${GREEN}║                                                              ║${NC}"
+  echo -e "${BOLD}${GREEN}║  4. Create the cluster (30–45 minutes):                      ║${NC}"
+  echo -e "${BOLD}${GREEN}║       terraform apply                                        ║${NC}"
+  echo -e "${BOLD}${GREEN}╚══════════════════════════════════════════════════════════════╝${NC}"
   echo ""
   exit 0
 fi
+
+# ─── Failures — per-group remediation ─────────────────────────────────────────
+
+echo ""
+echo -e "${BOLD}${RED}╔══════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${BOLD}${RED}║   ✘  Action Required — Missing Permissions Detected          ║${NC}"
+echo -e "${BOLD}${RED}╠══════════════════════════════════════════════════════════════╣${NC}"
+echo -e "${BOLD}${RED}║  Do not proceed with terraform apply until all issues below  ║${NC}"
+echo -e "${BOLD}${RED}║  are resolved. The installer will fail mid-way and leave     ║${NC}"
+echo -e "${BOLD}${RED}║  orphaned AWS resources that you will have to clean up.      ║${NC}"
+echo -e "${BOLD}${RED}╚══════════════════════════════════════════════════════════════╝${NC}"
+
+echo ""
+echo -e "${BOLD}  Failed permission groups:${NC}"
+for g in "${FAILED_GROUPS[@]}"; do
+  echo -e "    ${RED}✘${NC}  $g"
+done
+
+if [[ ${#FAILED_ACTIONS[@]} -gt 0 ]]; then
+  echo ""
+  echo -e "${BOLD}  Denied actions:${NC}"
+  for a in "${FAILED_ACTIONS[@]}"; do
+    echo -e "    ${RED}✘${NC}  $a"
+  done
+fi
+
+# Per-group fix instructions
+echo ""
+echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${BOLD}  How to fix — step-by-step remediation${NC}"
+echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+
+for group in "${FAILED_GROUPS[@]}"; do
+  echo ""
+  case "$group" in
+
+    "EC2 VPC & Networking"|"EC2 Instances & Security Groups")
+      echo -e "  ${RED}✘${NC}  ${BOLD}$group${NC}"
+      echo ""
+      echo "     The IAM user/role is missing EC2 permissions required to create"
+      echo "     VPCs, subnets, security groups, and launch EC2 instances."
+      echo ""
+      echo "     Fix — attach the following managed policy to your IAM user/role:"
+      echo ""
+      echo "       Policy ARN: arn:aws:iam::aws:policy/AmazonEC2FullAccess"
+      echo ""
+      echo "       aws iam attach-user-policy \\"
+      echo "         --user-name <your-iam-user> \\"
+      echo "         --policy-arn arn:aws:iam::aws:policy/AmazonEC2FullAccess"
+      echo ""
+      echo "     Or for a least-privilege setup, create a custom policy using:"
+      echo "       https://docs.openshift.com/container-platform/latest/installing/"
+      echo "       installing_aws/installing-aws-account.html#installation-aws-permissions"
+      ;;
+
+    "ELB / ELBv2")
+      echo -e "  ${RED}✘${NC}  ${BOLD}$group${NC}"
+      echo ""
+      echo "     The IAM user/role is missing Elastic Load Balancing permissions."
+      echo "     OpenShift creates load balancers for the API server and ingress router."
+      echo ""
+      echo "     Fix — attach the following managed policy:"
+      echo ""
+      echo "       Policy ARN: arn:aws:iam::aws:policy/ElasticLoadBalancingFullAccess"
+      echo ""
+      echo "       aws iam attach-user-policy \\"
+      echo "         --user-name <your-iam-user> \\"
+      echo "         --policy-arn arn:aws:iam::aws:policy/ElasticLoadBalancingFullAccess"
+      echo ""
+      echo "     AWS Docs:"
+      echo "       https://docs.aws.amazon.com/elasticloadbalancing/latest/userguide/"
+      echo "       load-balancer-getting-started.html"
+      ;;
+
+    "IAM Roles & Policies")
+      echo -e "  ${RED}✘${NC}  ${BOLD}$group${NC}"
+      echo ""
+      echo "     The IAM user/role cannot create or manage IAM roles. OpenShift"
+      echo "     creates IAM roles for EC2 instance profiles (master, worker, bootstrap)."
+      echo "     iam:PassRole is also required to assign those roles to instances."
+      echo ""
+      echo "     Fix — attach the following managed policy:"
+      echo ""
+      echo "       Policy ARN: arn:aws:iam::aws:policy/IAMFullAccess"
+      echo ""
+      echo "       aws iam attach-user-policy \\"
+      echo "         --user-name <your-iam-user> \\"
+      echo "         --policy-arn arn:aws:iam::aws:policy/IAMFullAccess"
+      echo ""
+      echo "     For a scoped approach using a permission boundary, see:"
+      echo "       https://docs.openshift.com/container-platform/latest/installing/"
+      echo "       installing_aws/installing-aws-account.html#installation-aws-iam-user"
+      ;;
+
+    "Route53 DNS")
+      echo -e "  ${RED}✘${NC}  ${BOLD}$group${NC}"
+      echo ""
+      echo "     The IAM user/role is missing Route53 permissions. OpenShift creates"
+      echo "     a private hosted zone and DNS records for the API and ingress endpoints."
+      echo ""
+      echo "     Fix — attach the following managed policy:"
+      echo ""
+      echo "       Policy ARN: arn:aws:iam::aws:policy/AmazonRoute53FullAccess"
+      echo ""
+      echo "       aws iam attach-user-policy \\"
+      echo "         --user-name <your-iam-user> \\"
+      echo "         --policy-arn arn:aws:iam::aws:policy/AmazonRoute53FullAccess"
+      echo ""
+      echo "     Also ensure a Route53 PUBLIC hosted zone exists for your base domain:"
+      echo ""
+      echo "       aws route53 create-hosted-zone \\"
+      echo "         --name <your-base-domain> \\"
+      echo "         --caller-reference \$(date +%s)"
+      echo ""
+      echo "     AWS Docs:"
+      echo "       https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/"
+      echo "       CreatingHostedZone.html"
+      ;;
+
+    "S3 Bucket & Objects")
+      echo -e "  ${RED}✘${NC}  ${BOLD}$group${NC}"
+      echo ""
+      echo "     The IAM user/role is missing S3 permissions. OpenShift uses an S3"
+      echo "     bucket to host the bootstrap node's ignition configuration file."
+      echo ""
+      echo "     Fix — attach the following managed policy:"
+      echo ""
+      echo "       Policy ARN: arn:aws:iam::aws:policy/AmazonS3FullAccess"
+      echo ""
+      echo "       aws iam attach-user-policy \\"
+      echo "         --user-name <your-iam-user> \\"
+      echo "         --policy-arn arn:aws:iam::aws:policy/AmazonS3FullAccess"
+      echo ""
+      echo "     AWS Docs:"
+      echo "       https://docs.aws.amazon.com/AmazonS3/latest/userguide/"
+      echo "       security-iam-awsmanpol.html"
+      ;;
+
+    "STS & Service Quotas")
+      echo -e "  ${RED}✘${NC}  ${BOLD}$group${NC}"
+      echo ""
+      echo "     The IAM user/role cannot call STS or read service quotas."
+      echo "     sts:AssumeRole is required for the installer to assume service roles."
+      echo "     servicequotas is used to validate EC2 instance limits before install."
+      echo ""
+      echo "     Fix — add an inline policy to your IAM user/role:"
+      echo ""
+      echo "       aws iam put-user-policy \\"
+      echo "         --user-name <your-iam-user> \\"
+      echo "         --policy-name OcpStsQuotas \\"
+      echo "         --policy-document '{"
+      echo "           \"Version\": \"2012-10-17\","
+      echo "           \"Statement\": [{"
+      echo "             \"Effect\": \"Allow\","
+      echo "             \"Action\": [\"sts:AssumeRole\", \"servicequotas:*\"],"
+      echo "             \"Resource\": \"*\""
+      echo "           }]"
+      echo "         }'"
+      ;;
+
+    *)
+      echo -e "  ${RED}✘${NC}  ${BOLD}$group${NC}"
+      echo "     Refer to the full IAM requirements in the Red Hat documentation."
+      ;;
+  esac
+done
+
+# ─── General remediation footer ───────────────────────────────────────────────
+
+echo ""
+echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${BOLD}  General remediation steps${NC}"
+echo -e "${BOLD}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+echo "  1. Apply the fixes listed above for each failed group."
+echo ""
+echo "  2. Wait 10–15 seconds for IAM policy propagation, then re-run:"
+echo "       ./scripts/check-aws-permissions.sh"
+echo ""
+echo "  3. For the full list of required IAM actions and a ready-to-use"
+echo "     policy JSON you can copy directly into AWS:"
+echo ""
+echo "     https://docs.openshift.com/container-platform/latest/installing/"
+echo "     installing_aws/installing-aws-account.html#installation-aws-permissions"
+echo ""
+echo "  4. If using an IAM role instead of a user, replace --user-name with"
+echo "     --role-name in the commands above."
+echo ""
+echo "  5. Verify your changes took effect:"
+echo "       aws iam list-attached-user-policies --user-name <your-iam-user>"
+echo ""
+exit 1
