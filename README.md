@@ -14,6 +14,33 @@ Terraform wrapper for deploying a Red Hat OpenShift Container Platform cluster o
 | `aws` CLI | 2.x | https://aws.amazon.com/cli/ |
 | `jq` | 1.6+ | https://jqlang.github.io/jq/ |
 
+### AWS Authentication
+
+Terraform uses the standard AWS credential chain. Choose one method:
+
+**Option 1 — Named profile (recommended for local use)**
+```bash
+aws configure --profile ocp-installer
+# then set in terraform.tfvars:
+aws_profile = "ocp-installer"
+```
+
+**Option 2 — Environment variables (recommended for CI/CD)**
+```bash
+export AWS_ACCESS_KEY_ID="AKIA..."
+export AWS_SECRET_ACCESS_KEY="..."
+export AWS_SESSION_TOKEN="..."     # only for temporary/STS credentials
+# leave aws_profile empty in terraform.tfvars
+```
+
+**Option 3 — IAM Instance Role**
+No configuration needed when running on EC2/ECS/EKS — the provider picks up the role automatically.
+
+Verify credentials are working before applying:
+```bash
+aws sts get-caller-identity
+```
+
 ### AWS Requirements
 
 - IAM user or role with [OpenShift IPI permissions](https://docs.openshift.com/container-platform/latest/installing/installing_aws/installing-aws-account.html)

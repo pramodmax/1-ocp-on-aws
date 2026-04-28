@@ -1,6 +1,32 @@
 # ─── Copy this file to terraform.tfvars and fill in your values ──────────────
 # terraform.tfvars is listed in .gitignore — never commit it.
 
+# ─── AWS Authentication ───────────────────────────────────────────────────────
+#
+# Terraform uses the standard AWS credential chain. Choose ONE method:
+#
+# METHOD 1 — AWS CLI named profile (recommended for local use)
+#   Set aws_profile below, or run: aws configure --profile my-profile
+#
+# METHOD 2 — Environment variables (recommended for CI/CD pipelines)
+#   Export before running terraform:
+#     export AWS_ACCESS_KEY_ID="AKIA..."
+#     export AWS_SECRET_ACCESS_KEY="..."
+#     export AWS_SESSION_TOKEN="..."        # only if using temporary credentials
+#   Leave aws_profile empty when using env vars.
+#
+# METHOD 3 — IAM Role (for EC2 / ECS / EKS workloads)
+#   No configuration needed — the provider picks up the instance role automatically.
+#   Leave aws_profile empty.
+#
+# Verify your active credentials at any time:
+#   aws sts get-caller-identity --profile <your-profile>
+#
+# Required IAM permissions: https://docs.openshift.com/container-platform/latest/installing/installing_aws/installing-aws-account.html
+
+aws_profile = ""                      # e.g. "default", "ocp-installer", "prod"
+                                      # Leave empty to use env vars or instance role
+
 # ─── Required ─────────────────────────────────────────────────────────────────
 
 cluster_name = "my-ocp-cluster"       # e.g. dev-cluster, prod-ocp, acme-ocp

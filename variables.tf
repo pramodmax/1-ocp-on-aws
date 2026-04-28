@@ -29,6 +29,18 @@ variable "aws_region" {
   default     = "us-east-1"
 }
 
+variable "aws_profile" {
+  description = <<-EOT
+    AWS CLI named profile to use (from ~/.aws/credentials or ~/.aws/config).
+    Leave empty to use the default credential chain:
+      1. Environment variables (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY)
+      2. Default AWS CLI profile
+      3. IAM instance role (if running on EC2/ECS)
+  EOT
+  type    = string
+  default = ""
+}
+
 variable "availability_zones" {
   description = "List of AWS availability zones. Leave empty to auto-select from the region."
   type        = list(string)
