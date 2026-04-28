@@ -91,11 +91,24 @@ else
   pass "base_domain = ${BASE_DOMAIN}"
 fi
 
-# pull_secret
-PULL_SECRET_LINE=$(grep -E "^[[:space:]]*pull_secret[[:space:]]*=" "$TFVARS_FILE" 2>/dev/null | head -1 || true)
-PULL_SECRET_VAL=$(echo "$PULL_SECRET_LINE" | sed "s/^[^=]*=[[:space:]]*//" | sed 's/^"//; s/"[[:space:]]*$//' | tr -d '\r')
-if [[ -z "$PULL_SECRET_VAL" ]]; then
-  fail "pull_secret is empty — paste your Red Hat pull secret"
+# pull_secret — supports both heredoc (<<-EOT) and quoted string formats
+PULL_SECRET_HEADER=$(grep -E "^[[:space:]]*pull_secret[[:space:]]*=" "$TFVARS_FILE" 2>/dev/null | head -1 || true)
+PULL_SECRET_VAL=""
+
+if echo "$PULL_SECRET_HEADER" | grep -q "<<"; then
+  # Heredoc format: find the marker name and extract the content between the markers
+  HEREDOC_MARKER=$(echo "$PULL_SECRET_HEADER" | sed 's/.*<<-\?[[:space:]]*//' | tr -d '[:space:]\r')
+  PULL_SECRET_VAL=$(awk \
+    "/^[[:space:]]*pull_secret[[:space:]]*=.*<</{found=1; next} \
+     found && /^[[:space:]]*${HEREDOC_MARKER}[[:space:]]*$/{exit} \
+     found{print}" "$TFVARS_FILE" | tr -d '\r')
+else
+  # Quoted string format
+  PULL_SECRET_VAL=$(echo "$PULL_SECRET_HEADER" | sed 's/^[^=]*=[[:space:]]*//' | sed 's/^"//; s/"[[:space:]]*$//' | tr -d '\r')
+fi
+
+if [[ -z "$PULL_SECRET_VAL" ]] || [[ "$PULL_SECRET_VAL" == "PASTE_YOUR_PULL_SECRET_JSON_HERE" ]]; then
+  fail "pull_secret is empty — paste your Red Hat pull secret from https://console.redhat.com/openshift/install/pull-secret"
 elif [[ "$PULL_SECRET_VAL" == '{"auths":{}' ]] || [[ "$PULL_SECRET_VAL" == "{}" ]]; then
   fail "pull_secret appears to be empty or a stub — paste the full JSON from console.redhat.com"
 elif command -v jq &>/dev/null; then
@@ -218,10 +231,14 @@ else
         echo "     1. Go to: https://console.redhat.com/openshift/install/pull-secret"
         echo "     2. Log in with your Red Hat account"
         echo "     3. Click 'Copy pull secret'"
-        echo "     4. Paste it as the pull_secret value in terraform.tfvars:"
-        echo "          pull_secret = \"{\\\"auths\\\":{...}}\""
+        echo "     4. Paste it into terraform.tfvars using heredoc format (avoids quote-escaping errors):"
         echo ""
-        echo "     The pull secret is a JSON object — paste it as a single-line quoted string."
+        echo "          pull_secret = <<-EOT"
+        echo "          {\"auths\":{\"cloud.openshift.com\":{...}}}"
+        echo "          EOT"
+        echo ""
+        echo "     The closing EOT must be at the start of its own line with no leading spaces."
+        echo "     Do NOT use pull_secret = \"{...}\" — HCL cannot parse JSON inside double-quoted strings."
         echo ""
         ;;
 

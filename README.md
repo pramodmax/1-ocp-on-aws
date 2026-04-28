@@ -230,14 +230,21 @@ If `iam:SimulatePrincipalPolicy` is not allowed on your principal, the script au
 ### Red Hat Pull Secret
 
 1. Go to https://console.redhat.com/openshift/install/pull-secret
-2. Log in with your Red Hat account
+2. Log in with your Red Hat account (free — register at https://www.redhat.com/wapps/ugc/register.html if needed)
 3. Click **Copy pull secret**
-4. Paste it into `terraform.tfvars` as the `pull_secret` value:
-   ```
-   pull_secret = "{\"auths\":{...}}"
-   ```
+4. Paste it into `terraform.tfvars` using the **heredoc format** shown below
 
-> A Red Hat account is free. If you don't have one, register at https://www.redhat.com/wapps/ugc/register.html
+The pull secret is a JSON blob that contains double-quote characters. Placing it inside an HCL double-quoted string requires escaping every `"` as `\"`, which is error-prone. Use a heredoc instead — no escaping required:
+
+```hcl
+pull_secret = <<-EOT
+{"auths":{"cloud.openshift.com":{"auth":"b3Bl...","email":"you@example.com"},"quay.io":{"auth":"b3Bl...","email":"you@example.com"}}}
+EOT
+```
+
+Paste the full JSON on a single line between the `<<-EOT` and `EOT` markers. The closing `EOT` must be at the start of its own line with no leading spaces.
+
+> Do **not** use the quoted string format `pull_secret = "{...}"` — Terraform will error with `Missing newline after argument` because the JSON's internal double-quotes break HCL string parsing.
 
 ---
 
