@@ -14,6 +14,156 @@ Terraform wrapper for deploying a Red Hat OpenShift Container Platform cluster o
 | `aws` CLI | 2.x | https://aws.amazon.com/cli/ |
 | `jq` | 1.6+ | https://jqlang.github.io/jq/ |
 
+### Installing Terraform
+
+Terraform orchestrates the installation. Minimum required version is **1.5.0**.
+
+**macOS — Homebrew (recommended)**
+```bash
+brew tap hashicorp/tap
+brew install hashicorp/tap/terraform
+terraform version
+```
+
+**macOS — Manual**
+```bash
+curl -sLO https://releases.hashicorp.com/terraform/1.9.8/terraform_1.9.8_darwin_arm64.zip
+unzip terraform_1.9.8_darwin_arm64.zip
+sudo mv terraform /usr/local/bin/
+terraform version
+```
+> Use `darwin_amd64` for Intel Macs. Check the [latest release](https://releases.hashicorp.com/terraform/) for the current version number.
+
+**Linux — Package manager**
+```bash
+# Debian / Ubuntu
+sudo apt-get update && sudo apt-get install -y gnupg software-properties-common
+wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" \
+  | sudo tee /etc/apt/sources.list.d/hashicorp.list
+sudo apt-get update && sudo apt-get install terraform
+
+# RHEL / CentOS / Fedora
+sudo yum install -y yum-utils
+sudo yum-config-manager --add-repo https://rpm.releases.hashicorp.com/RHEL/hashicorp.repo
+sudo yum install terraform
+```
+
+**Linux — Manual**
+```bash
+curl -sLO https://releases.hashicorp.com/terraform/1.9.8/terraform_1.9.8_linux_amd64.zip
+unzip terraform_1.9.8_linux_amd64.zip
+sudo mv terraform /usr/local/bin/
+terraform version
+```
+
+**Windows — Chocolatey**
+```powershell
+choco install terraform
+```
+
+**Windows — Winget**
+```powershell
+winget install --id Hashicorp.Terraform
+```
+
+Verify the installation:
+```bash
+terraform version
+# Terraform v1.9.8 (or later)
+```
+
+---
+
+### Installing OpenShift CLI Tools
+
+Both `openshift-install` and `oc` must match (or be compatible with) the target OpenShift version.
+
+**Step 1 — Find your target version**
+
+Browse available releases at:
+```
+https://mirror.openshift.com/pub/openshift-v4/clients/ocp/
+```
+
+**Step 2 — Download and install (macOS / Linux)**
+```bash
+OCP_VERSION="4.16.3"   # set to your target version
+
+# openshift-install
+curl -sLO "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/${OCP_VERSION}/openshift-install-linux.tar.gz"
+tar -xzf openshift-install-linux.tar.gz
+sudo mv openshift-install /usr/local/bin/
+chmod +x /usr/local/bin/openshift-install
+
+# oc CLI
+curl -sLO "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/${OCP_VERSION}/openshift-client-linux.tar.gz"
+tar -xzf openshift-client-linux.tar.gz
+sudo mv oc kubectl /usr/local/bin/
+chmod +x /usr/local/bin/oc
+
+# Verify
+openshift-install version
+oc version --client
+```
+
+> macOS users: replace `linux` with `mac` in the URLs above (e.g. `openshift-install-mac.tar.gz`).
+
+---
+
+### Installing AWS CLI v2
+
+**macOS**
+```bash
+curl -sL "https://awscli.amazonaws.com/AWSCLIV2.pkg" -o /tmp/AWSCLIV2.pkg
+sudo installer -pkg /tmp/AWSCLIV2.pkg -target /
+aws --version
+```
+
+**Linux**
+```bash
+curl -sL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+unzip /tmp/awscliv2.zip -d /tmp
+sudo /tmp/aws/install
+aws --version
+```
+
+**Windows**
+Download and run the MSI installer:
+```
+https://awscli.amazonaws.com/AWSCLIV2.msi
+```
+
+---
+
+### Installing jq
+
+```bash
+# macOS
+brew install jq
+
+# Debian / Ubuntu
+sudo apt-get install -y jq
+
+# RHEL / CentOS / Fedora
+sudo yum install -y jq
+
+# Manual (Linux)
+curl -sLo /usr/local/bin/jq https://github.com/jqlang/jq/releases/latest/download/jq-linux-amd64
+chmod +x /usr/local/bin/jq
+```
+
+Verify all tools are ready:
+```bash
+terraform version
+openshift-install version
+oc version --client
+aws --version
+jq --version
+```
+
+---
+
 ### AWS Authentication
 
 Terraform uses the standard AWS credential chain. Choose one method:
