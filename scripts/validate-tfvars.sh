@@ -96,12 +96,14 @@ PULL_SECRET_HEADER=$(grep -E "^[[:space:]]*pull_secret[[:space:]]*=" "$TFVARS_FI
 PULL_SECRET_VAL=""
 
 if echo "$PULL_SECRET_HEADER" | grep -q "<<"; then
-  # Heredoc format: find the marker name and extract the content between the markers
-  HEREDOC_MARKER=$(echo "$PULL_SECRET_HEADER" | sed 's/.*<<-\?[[:space:]]*//' | tr -d '[:space:]\r')
-  PULL_SECRET_VAL=$(awk \
-    "/^[[:space:]]*pull_secret[[:space:]]*=.*<</{found=1; next} \
-     found && /^[[:space:]]*${HEREDOC_MARKER}[[:space:]]*$/{exit} \
-     found{print}" "$TFVARS_FILE" | tr -d '\r')
+  # Heredoc format: locate the declaration line by number, derive the closing
+  # marker, then use NR-based awk (line numbers) and exact string comparison
+  # ($0 == marker) — avoids regex quoting issues with shell-expanded variables.
+  PS_LINENO=$(grep -n "pull_secret[[:space:]]*=.*<<" "$TFVARS_FILE" | head -1 | cut -d: -f1)
+  HEREDOC_MARKER=$(sed -n "${PS_LINENO}p" "$TFVARS_FILE" | sed 's/.*<<-\?[[:space:]]*//' | tr -d '\r\t ')
+  PULL_SECRET_VAL=$(awk -v start="$PS_LINENO" -v marker="$HEREDOC_MARKER" \
+    'NR > start && $0 == marker { exit }
+     NR > start { print }' "$TFVARS_FILE" | tr -d '\r')
 else
   # Quoted string format
   PULL_SECRET_VAL=$(echo "$PULL_SECRET_HEADER" | sed 's/^[^=]*=[[:space:]]*//' | sed 's/^"//; s/"[[:space:]]*$//' | tr -d '\r')
