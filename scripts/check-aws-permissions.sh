@@ -131,20 +131,26 @@ else
   fi
 fi
 
-# AWS credentials
+# AWS credentials — capture stderr so we can show the real error to the user
+CREDS_ERR=""
 if [[ "${#PREREQ_FAILURES[@]}" -eq 0 ]]; then
-  IDENTITY=$(_aws sts get-caller-identity --output json 2>/dev/null) || IDENTITY=""
-  if [[ -z "$IDENTITY" ]]; then
-    echo -e "  ${RED}✘${NC}  AWS credentials not found or invalid"
-    PREREQ_FAILURES+=("aws_creds")
-  else
-    ACCOUNT=$(echo "$IDENTITY"       | jq -r '.Account')
-    PRINCIPAL_ARN=$(echo "$IDENTITY" | jq -r '.Arn')
-    USER_ID=$(echo "$IDENTITY"       | jq -r '.UserId')
+  IDENTITY_RAW=$(_aws sts get-caller-identity --output json 2>&1) || true
+  # Valid response is JSON with an Account field; anything else is an error
+  if echo "$IDENTITY_RAW" | jq -e '.Account' &>/dev/null; then
+    ACCOUNT=$(echo "$IDENTITY_RAW"       | jq -r '.Account')
+    PRINCIPAL_ARN=$(echo "$IDENTITY_RAW" | jq -r '.Arn')
+    USER_ID=$(echo "$IDENTITY_RAW"       | jq -r '.UserId')
+    IDENTITY="$IDENTITY_RAW"
     echo -e "  ${GREEN}✔${NC}  AWS credentials valid"
     printf "     Account  : %s\n" "$ACCOUNT"
     printf "     Principal: %s\n" "$PRINCIPAL_ARN"
     printf "     UserId   : %s\n" "$USER_ID"
+  else
+    IDENTITY=""
+    CREDS_ERR="$IDENTITY_RAW"
+    echo -e "  ${RED}✘${NC}  AWS credentials not found or invalid"
+    [[ -n "$CREDS_ERR" ]] && echo -e "     ${YELLOW}AWS error:${NC} $CREDS_ERR"
+    PREREQ_FAILURES+=("aws_creds")
   fi
 fi
 
@@ -206,16 +212,42 @@ if [[ "${#PREREQ_FAILURES[@]}" -gt 0 ]]; then
         ;;
       aws_creds)
         echo -e "  ${RED}✘${NC}  ${BOLD}AWS credentials not configured or invalid${NC}"
-        echo "     Option 1 — Environment variables (export before running this script):"
-        echo "       export AWS_ACCESS_KEY_ID=AKIA..."
-        echo "       export AWS_SECRET_ACCESS_KEY=..."
-        echo "       export AWS_SESSION_TOKEN=...   # only if using temporary credentials"
+        [[ -n "$CREDS_ERR" ]] && echo -e "     ${BOLD}Reason :${NC} $CREDS_ERR"
         echo ""
-        echo "     Option 2 — Named profile:"
-        echo "       aws configure --profile ocp-installer"
-        echo "       ./scripts/check-aws-permissions.sh --profile ocp-installer"
-        echo ""
-        echo "     Verify: aws sts get-caller-identity"
+
+        if [[ -n "$PROFILE" ]]; then
+          # Profile was explicitly passed — give profile-specific guidance
+          echo "     You passed --profile ${PROFILE} but this profile could not authenticate."
+          echo "     Possible causes:"
+          echo "       • Profile '${PROFILE}' does not exist in ~/.aws/credentials or ~/.aws/config"
+          echo "       • The access key or secret key for this profile is incorrect or expired"
+          echo "       • The profile uses SSO or a role that requires a separate login step"
+          echo ""
+          echo "     Fix — create or update the profile:"
+          echo "       aws configure --profile ${PROFILE}"
+          echo "         AWS Access Key ID     : AKIA..."
+          echo "         AWS Secret Access Key : ..."
+          echo "         Default region        : us-east-1"
+          echo ""
+          echo "     Check what profiles are configured:"
+          echo "       cat ~/.aws/credentials"
+          echo "       cat ~/.aws/config"
+          echo ""
+          echo "     Verify the profile works:"
+          echo "       aws sts get-caller-identity --profile ${PROFILE}"
+        else
+          # No profile — guide on env vars and default profile
+          echo "     Option 1 — Environment variables:"
+          echo "       export AWS_ACCESS_KEY_ID=AKIA..."
+          echo "       export AWS_SECRET_ACCESS_KEY=..."
+          echo "       export AWS_SESSION_TOKEN=...   # only for temporary/STS credentials"
+          echo ""
+          echo "     Option 2 — Named profile:"
+          echo "       aws configure --profile ocp-installer"
+          echo "       ./scripts/check-aws-permissions.sh --profile ocp-installer"
+          echo ""
+          echo "     Verify: aws sts get-caller-identity"
+        fi
         echo ""
         ;;
     esac
