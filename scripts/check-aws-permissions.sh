@@ -8,7 +8,7 @@
 #   ./scripts/check-aws-permissions.sh --profile my-aws-profile
 #   ./scripts/check-aws-permissions.sh --verbose
 
-set -euo pipefail
+set -eo pipefail
 
 # ─── Colours ──────────────────────────────────────────────────────────────────
 
@@ -32,8 +32,16 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-AWS_ARGS=()
-[[ -n "$PROFILE" ]] && AWS_ARGS+=(--profile "$PROFILE")
+# _aws: wraps every aws call so --profile is injected when provided.
+# Avoids the "unbound variable" error that bash 3.2 (macOS default) throws
+# when expanding an empty array under set -u.
+_aws() {
+  if [[ -n "$PROFILE" ]]; then
+    aws --profile "$PROFILE" "$@"
+  else
+    aws "$@"
+  fi
+}
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -42,13 +50,13 @@ FAILED_ACTIONS=()
 PASSED_GROUPS=0
 TOTAL_GROUPS=0
 
-pass_group()  { echo -e "  ${GREEN}✔${NC}  $1"; ((PASSED_GROUPS++)); ((TOTAL_GROUPS++)); }
-fail_group()  { echo -e "  ${RED}✘${NC}  $1"; FAILED_GROUPS+=("$1"); ((TOTAL_GROUPS++)); }
-warn()        { echo -e "  ${YELLOW}⚠${NC}  $1"; }
-info()        { echo -e "  ${CYAN}ℹ${NC}  $1"; }
+pass_group() { echo -e "  ${GREEN}✔${NC}  $1"; ((PASSED_GROUPS++)); ((TOTAL_GROUPS++)); }
+fail_group() { echo -e "  ${RED}✘${NC}  $1"; FAILED_GROUPS+=("$1"); ((TOTAL_GROUPS++)); }
+warn()       { echo -e "  ${YELLOW}⚠${NC}  $1"; }
+info()       { echo -e "  ${CYAN}ℹ${NC}  $1"; }
 
-# Simulate a list of IAM actions against *.
-# Prints PASS/FAIL per action in verbose mode, returns 1 if any are denied.
+# Simulate a batch of IAM actions against *.
+# Prints per-action result in verbose mode. Returns 1 if any are denied.
 check_permissions() {
   local group_name="$1"
   shift
@@ -56,17 +64,16 @@ check_permissions() {
   local denied=()
 
   local result
-  result=$(aws iam simulate-principal-policy \
-    "${AWS_ARGS[@]}" \
+  result=$(_aws iam simulate-principal-policy \
     --policy-source-arn "$PRINCIPAL_ARN" \
     --action-names "${actions[@]}" \
     --resource-arns "*" \
     --output json 2>/dev/null)
 
   while IFS= read -r line; do
-    action=$(echo "$line" | jq -r '.EvalActionName')
+    local action decision
+    action=$(echo "$line"   | jq -r '.EvalActionName')
     decision=$(echo "$line" | jq -r '.EvalDecision')
-
     if [[ "$decision" != "allowed" ]]; then
       denied+=("$action ($decision)")
       FAILED_ACTIONS+=("$action")
@@ -110,18 +117,19 @@ echo ""
 
 echo -e "${BOLD}  Identity${NC}"
 
-IDENTITY=$(aws sts get-caller-identity "${AWS_ARGS[@]}" --output json 2>/dev/null) || {
+IDENTITY=$(_aws sts get-caller-identity --output json 2>/dev/null) || {
   echo -e "  ${RED}✘${NC}  Could not get caller identity. Check your credentials."
   echo ""
   echo "  Hints:"
-  echo "    aws configure --profile <name>"
-  echo "    export AWS_ACCESS_KEY_ID=... && export AWS_SECRET_ACCESS_KEY=..."
+  echo "    export AWS_ACCESS_KEY_ID=AKIA..."
+  echo "    export AWS_SECRET_ACCESS_KEY=..."
+  echo "    aws configure --profile <name>  then pass --profile <name> to this script"
   exit 1
 }
 
-ACCOUNT=$(echo "$IDENTITY" | jq -r '.Account')
+ACCOUNT=$(echo "$IDENTITY"       | jq -r '.Account')
 PRINCIPAL_ARN=$(echo "$IDENTITY" | jq -r '.Arn')
-USER_ID=$(echo "$IDENTITY" | jq -r '.UserId')
+USER_ID=$(echo "$IDENTITY"       | jq -r '.UserId')
 
 echo -e "  ${GREEN}✔${NC}  Authenticated"
 printf "     Account  : %s\n" "$ACCOUNT"
@@ -133,21 +141,19 @@ echo ""
 
 echo -e "${BOLD}  Checking IAM simulation access${NC}"
 
-SIMULATE_TEST=$(aws iam simulate-principal-policy \
-  "${AWS_ARGS[@]}" \
+SIMULATE_AVAILABLE=false
+SIMULATE_TEST=$(_aws iam simulate-principal-policy \
   --policy-source-arn "$PRINCIPAL_ARN" \
   --action-names "sts:GetCallerIdentity" \
   --resource-arns "*" \
-  --output json 2>&1) || {
-  warn "iam:SimulatePrincipalPolicy is not allowed for this principal."
-  warn "Falling back to live describe/list calls (read-only)."
-  echo ""
-  SIMULATE_AVAILABLE=false
-}
+  --output json 2>&1) || true
 
 if echo "$SIMULATE_TEST" | jq -e '.EvaluationResults' &>/dev/null; then
   echo -e "  ${GREEN}✔${NC}  iam:SimulatePrincipalPolicy available — using policy simulation"
   SIMULATE_AVAILABLE=true
+else
+  warn "iam:SimulatePrincipalPolicy is not allowed for this principal."
+  warn "Falling back to live describe/list calls (read-only)."
 fi
 
 echo ""
@@ -251,7 +257,7 @@ if $SIMULATE_AVAILABLE; then
 
 else
 
-  # ─── Fallback: live describe calls ──────────────────────────────────────────
+  # ─── Fallback: live read-only describe calls ───────────────────────────────
 
   echo -e "${BOLD}  Fallback: Live Describe Calls (read-only)${NC}"
   echo ""
@@ -265,18 +271,19 @@ else
     fi
   }
 
-  run_check "EC2 DescribeVpcs"            aws ec2 describe-vpcs "${AWS_ARGS[@]}" --max-items 1
-  run_check "EC2 DescribeSubnets"         aws ec2 describe-subnets "${AWS_ARGS[@]}" --max-items 1
-  run_check "EC2 DescribeSecurityGroups"  aws ec2 describe-security-groups "${AWS_ARGS[@]}" --max-items 1
-  run_check "EC2 DescribeImages"          aws ec2 describe-images "${AWS_ARGS[@]}" --owners self --max-items 1
-  run_check "EC2 DescribeInstanceTypes"   aws ec2 describe-instance-types "${AWS_ARGS[@]}" --max-items 1
-  run_check "ELB DescribeLoadBalancers"   aws elbv2 describe-load-balancers "${AWS_ARGS[@]}"
-  run_check "IAM ListRoles"               aws iam list-roles "${AWS_ARGS[@]}" --max-items 1
-  run_check "IAM ListInstanceProfiles"    aws iam list-instance-profiles "${AWS_ARGS[@]}" --max-items 1
-  run_check "Route53 ListHostedZones"     aws route53 list-hosted-zones "${AWS_ARGS[@]}"
-  run_check "S3 ListBuckets"              aws s3api list-buckets "${AWS_ARGS[@]}"
-  run_check "STS GetCallerIdentity"       aws sts get-caller-identity "${AWS_ARGS[@]}"
-  run_check "ServiceQuotas ListQuotas"    aws service-quotas list-aws-default-service-quotas "${AWS_ARGS[@]}" --service-code ec2 --max-items 1
+  run_check "EC2 DescribeVpcs"           _aws ec2 describe-vpcs --max-items 1
+  run_check "EC2 DescribeSubnets"        _aws ec2 describe-subnets --max-items 1
+  run_check "EC2 DescribeSecurityGroups" _aws ec2 describe-security-groups --max-items 1
+  run_check "EC2 DescribeImages"         _aws ec2 describe-images --owners self --max-items 1
+  run_check "EC2 DescribeInstanceTypes"  _aws ec2 describe-instance-types --max-items 1
+  run_check "ELB DescribeLoadBalancers"  _aws elbv2 describe-load-balancers
+  run_check "IAM ListRoles"              _aws iam list-roles --max-items 1
+  run_check "IAM ListInstanceProfiles"   _aws iam list-instance-profiles --max-items 1
+  run_check "Route53 ListHostedZones"    _aws route53 list-hosted-zones
+  run_check "S3 ListBuckets"             _aws s3api list-buckets
+  run_check "STS GetCallerIdentity"      _aws sts get-caller-identity
+  run_check "ServiceQuotas ListQuotas"   _aws service-quotas list-aws-default-service-quotas \
+                                           --service-code ec2 --max-items 1
 
   warn "Fallback checks only verify read access. Write permissions (CreateVpc, RunInstances, etc.) cannot be verified without simulation."
 
