@@ -41,6 +41,36 @@ Verify credentials are working before applying:
 aws sts get-caller-identity
 ```
 
+### AWS Permission Check
+
+Before running `terraform apply`, verify your credentials have all the required IAM permissions for OpenShift IPI. The script uses `aws iam simulate-principal-policy` — no real resources are created.
+
+```bash
+chmod +x scripts/check-aws-permissions.sh
+
+# Using default credentials
+./scripts/check-aws-permissions.sh
+
+# Using a named profile
+./scripts/check-aws-permissions.sh --profile ocp-installer
+
+# Show pass/fail for every individual action
+./scripts/check-aws-permissions.sh --verbose
+```
+
+The script checks permissions across six service groups:
+
+| Group | Key Actions |
+|-------|-------------|
+| EC2 Networking | VPC, subnets, NAT gateways, route tables, internet gateways |
+| EC2 Compute | RunInstances, security groups, AMIs, EBS volumes |
+| ELB / ELBv2 | API and ingress load balancers, target groups, listeners |
+| IAM | Roles, instance profiles, PassRole |
+| Route53 | Hosted zone management, record sets |
+| S3 | Bootstrap ignition bucket, object access |
+
+If `iam:SimulatePrincipalPolicy` is not allowed on your principal, the script automatically falls back to live read-only describe calls and warns you that write permissions cannot be verified.
+
 ### AWS Requirements
 
 - IAM user or role with [OpenShift IPI permissions](https://docs.openshift.com/container-platform/latest/installing/installing_aws/installing-aws-account.html)
@@ -68,13 +98,16 @@ vi terraform.tfvars          # Fill in required values
 # 3. Make scripts executable
 chmod +x scripts/*.sh
 
-# 4. Initialise Terraform
+# 4. Verify AWS credentials have sufficient permissions
+./scripts/check-aws-permissions.sh
+
+# 5. Initialise Terraform
 terraform init
 
-# 5. Preview the plan
+# 6. Preview the plan
 terraform plan
 
-# 6. Install the cluster (30–45 minutes)
+# 7. Install the cluster (30–45 minutes)
 terraform apply
 ```
 
@@ -185,6 +218,7 @@ Do **not** use `terraform destroy` directly — the cluster must be destroyed vi
 ├── templates/
 │   └── install-config.yaml.tpl   # OpenShift install-config template
 └── scripts/
+    ├── check-aws-permissions.sh  # Verify IAM permissions before installing
     ├── preflight.sh              # Pre-install checks (tools, AWS auth, DNS, quotas)
     ├── get-credentials.sh        # Display cluster login details
     └── destroy.sh                # Safe cluster teardown
