@@ -100,10 +100,15 @@ if echo "$PULL_SECRET_HEADER" | grep -q "<<"; then
   # marker, then use NR-based awk (line numbers) and exact string comparison
   # ($0 == marker) — avoids regex quoting issues with shell-expanded variables.
   PS_LINENO=$(grep -n "pull_secret[[:space:]]*=.*<<" "$TFVARS_FILE" | head -1 | cut -d: -f1)
-  HEREDOC_MARKER=$(sed -n "${PS_LINENO}p" "$TFVARS_FILE" | sed 's/.*<<-\?[[:space:]]*//' | tr -d '\r\t ')
+  # Use <<-* (not <<-\?) — \? is a GNU sed extension; BSD sed (macOS) ignores it,
+  # causing the full line to be returned unchanged. <<-* matches << followed by
+  # zero or more dashes, which covers both <<EOT and <<-EOT.
+  HEREDOC_MARKER=$(sed -n "${PS_LINENO}p" "$TFVARS_FILE" | sed 's/.*<<-*//' | tr -d '\r\t ')
+  # Use regex match (~ "^"marker) instead of exact equality ($0 == marker) so
+  # a closing marker with accidental trailing whitespace is still recognised.
   PULL_SECRET_VAL=$(awk -v start="$PS_LINENO" -v marker="$HEREDOC_MARKER" \
-    'NR > start && $0 == marker { exit }
-     NR > start { print }' "$TFVARS_FILE" | tr -d '\r')
+    'NR > start { if ($0 ~ "^[[:space:]]*"marker"[[:space:]]*$") exit; print }' \
+    "$TFVARS_FILE" | tr -d '\r')
 else
   # Quoted string format
   PULL_SECRET_VAL=$(echo "$PULL_SECRET_HEADER" | sed 's/^[^=]*=[[:space:]]*//' | sed 's/^"//; s/"[[:space:]]*$//' | tr -d '\r')
