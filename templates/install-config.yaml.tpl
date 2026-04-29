@@ -1,6 +1,5 @@
 apiVersion: v1
 baseDomain: ${base_domain}
-featureSet: Default
 
 controlPlane:
   architecture: amd64
