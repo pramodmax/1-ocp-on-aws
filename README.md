@@ -527,6 +527,81 @@ oc get clusteroperators
 
 ---
 
+## Daily Cluster Startup
+
+AWS EC2 instances are stopped at the end of each day to reduce costs. Use the startup script to bring the cluster back online each morning.
+
+### Prerequisites
+
+Ensure AWS credentials are exported (or a named profile is configured) before running the script:
+
+```bash
+# Option A — environment variables
+export AWS_ACCESS_KEY_ID="AKIA..."
+export AWS_SECRET_ACCESS_KEY="..."
+export AWS_SESSION_TOKEN="..."   # only for temporary / STS credentials
+
+# Option B — named profile
+export AWS_PROFILE="ocp-installer"
+
+# Verify credentials
+aws sts get-caller-identity
+```
+
+### Running the startup script
+
+```bash
+chmod +x scripts/startup.sh   # first time only
+./scripts/startup.sh
+```
+
+The script runs four phases automatically:
+
+| Phase | What happens |
+|-------|-------------|
+| **1 — Credential check** | Calls `aws sts get-caller-identity` and exits immediately if credentials are missing or expired |
+| **2 — Start EC2 instances** | Finds all instances tagged `kubernetes.io/cluster/<infraID>=owned`, prints their current state, and starts any that are stopped. Already-running instances are skipped |
+| **3 — Wait for running state** | Polls every 15 s (up to 10 min) until every instance reaches the `running` state, then waits 30 s for OS and kubelet initialisation |
+| **4 — Cluster health check** | Probes the OCP API endpoint (`/readyz`) until it responds, then uses `oc get nodes` (via the saved kubeconfig) to confirm all nodes are `Ready` |
+
+On success the script prints:
+
+```
+╔══════════════════════════════════════════════════════════════╗
+║                  Cluster is UP                              ║
+╠══════════════════════════════════════════════════════════════╣
+║  API       : https://api.demo-ocp.sandbox2381.opentlc.com:6443
+║  Console   : https://console-openshift-console.apps.demo-ocp...
+╠══════════════════════════════════════════════════════════════╣
+║  Username  : kubeadmin                                      ║
+║  Password  : <password>                                     ║
+╠══════════════════════════════════════════════════════════════╣
+║  kubeconfig: clusters/demo-ocp/auth/kubeconfig              ║
+╚══════════════════════════════════════════════════════════════╝
+```
+
+### After the cluster is up
+
+```bash
+export KUBECONFIG=clusters/demo-ocp/auth/kubeconfig
+oc get nodes
+oc get clusteroperators
+```
+
+### Cluster details read by the script
+
+The script reads `clusters/demo-ocp/metadata.json` (written by the installer) — no manual configuration is required. It derives:
+
+| Value | Source |
+|-------|--------|
+| Cluster name | `metadata.json → clusterName` |
+| Infrastructure ID | `metadata.json → infraID` (used as the EC2 tag key) |
+| AWS region | `metadata.json → aws.region` |
+| API / console URLs | Constructed from `aws.clusterDomain` |
+| kubeconfig path | `clusters/<clusterName>/auth/kubeconfig` |
+
+---
+
 ## Destroy
 
 Run `terraform destroy` — the teardown is fully integrated and runs in three phases automatically:
@@ -561,7 +636,8 @@ A summary is printed at the end showing how many resources were freed and any th
     ├── validate-tfvars.sh        # Check terraform.tfvars is complete before applying
     ├── check-aws-permissions.sh  # Verify IAM permissions before installing
     ├── preflight.sh              # Pre-install checks (tools, AWS auth, DNS, quotas)
-    └── get-credentials.sh        # Display cluster login details
+    ├── get-credentials.sh        # Display cluster login details
+    └── startup.sh                # Start stopped EC2 instances and verify cluster health
 ```
 
 ---
